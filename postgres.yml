@@ -1,55 +1,55 @@
 ---
 - hosts: all
-  vars:
-    ansible_python_interpreter: /usr/bin/python3
+  become: yes
+  become_method: sudo
+  become_user: root
+  become_flags: '-i'
   
   tasks:
     - name: Install PostgreSQL packages
-      become: yes
       apt:
         pkg:
           - postgresql-12
           - postgresql-contrib-12
           - python3-pip
-          - python3-psycopg2
         state: present
         update_cache: yes
 
-    - name: Ensure PostgreSQL service is running
-      become: yes
+    - name: Install Python PostgreSQL dependencies
+      pip:
+        name: psycopg2-binary
+        state: present
+
+    - name: Ensure PostgreSQL service running
       systemd:
         name: postgresql
         state: started
         enabled: yes
 
     - name: Create application database
-      become: yes
       become_user: postgres
-      community.postgresql.postgresql_db:
+      postgresql_db:
         name: demodb
         state: present
 
     - name: Create database user
-      become: yes
       become_user: postgres
-      community.postgresql.postgresql_user:
+      postgresql_user:
         name: demouser
         password: demodb
         state: present
 
     - name: Grant database privileges
-      become: yes
       become_user: postgres
-      community.postgresql.postgresql_privs:
+      postgresql_privs:
         type: database
         database: demodb
         roles: demouser
         privs: ALL
 
     - name: Configure PostgreSQL authentication
-      become: yes
       become_user: postgres
-      community.postgresql.postgresql_pg_hba:
+      postgresql_pg_hba:
         dest: "/etc/postgresql/12/main/pg_hba.conf"
         contype: host
         databases: all
@@ -57,11 +57,9 @@
         address: 0.0.0.0/0
         method: md5
         create: true
-      notify: Restart PostgreSQL
 
   handlers:
     - name: Restart PostgreSQL
-      become: yes
       systemd:
         name: postgresql
         state: restarted
