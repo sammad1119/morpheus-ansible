@@ -3,9 +3,10 @@
   become: yes
   become_method: sudo
   become_user: root
+  become_flags: '-i'
   
-  pre_tasks:
-    - name: Ensure required system packages are installed
+  tasks:
+    - name: Install PostgreSQL packages
       apt:
         pkg:
           - postgresql-12
@@ -16,33 +17,22 @@
 
     - name: Install Python PostgreSQL dependencies
       pip:
-        name: 
-          - psycopg2-binary
+        name: psycopg2-binary
         state: present
 
-  tasks:
-    - name: Ensure PostgreSQL service is running
+    - name: Ensure PostgreSQL service running
       systemd:
         name: postgresql
         state: started
         enabled: yes
 
-    - name: Configure PostgreSQL listen addresses
-      lineinfile:
-        path: "/etc/postgresql/12/main/postgresql.conf"
-        regexp: "^#?listen_addresses.+$"
-        line: "listen_addresses = '{{ ansible_default_ipv4.address }}, localhost'"
-        mode: 0644
-
     - name: Create application database
-      become: yes
       become_user: postgres
       postgresql_db:
         name: demodb
         state: present
 
     - name: Create database user
-      become: yes
       become_user: postgres
       postgresql_user:
         name: demouser
@@ -50,7 +40,6 @@
         state: present
 
     - name: Grant database privileges
-      become: yes
       become_user: postgres
       postgresql_privs:
         type: database
@@ -59,7 +48,6 @@
         privs: ALL
 
     - name: Configure PostgreSQL authentication
-      become: yes
       become_user: postgres
       postgresql_pg_hba:
         dest: "/etc/postgresql/12/main/pg_hba.conf"
