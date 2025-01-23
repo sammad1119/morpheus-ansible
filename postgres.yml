@@ -1,29 +1,50 @@
 ---
 - hosts: all
   gather_facts: yes
-
   pre_tasks:
-    - name: "Install packages"
-      package: "name={{ item }} state=present"
-      with_items:
-        - postgresql
-        - postgresql-contrib
-    - name: Install Python Pip
+    - name: Check for held packages
+      shell: sudo apt-mark showhold
+      register: held_packages
+      changed_when: false
+
+    - name: Unhold any held packages
+      shell: sudo apt-mark unhold {{ item }}
+      loop: "{{ held_packages.stdout_lines }}"
+      when: held_packages.stdout_lines|length > 0
+      changed_when: true
+
+    - name: Clean package cache
+      command: |
+        sudo apt-get clean
+        sudo apt-get update
+      changed_when: true
+
+    - name: "Install required PostgreSQL packages"
+      apt:
+        name:
+          - postgresql-12
+          - postgresql-contrib-12
+        state: present
+        update_cache: true
+
+    - name: "Install Python Pip"
       package:
         name: python3-pip
         state: present
 
     - name: "Install Python packages"
-      pip: "name={{ item }}  state=present"
-      with_items:
-        - psycopg2-binary
+      pip:
+        name:
+          - psycopg2-binary
+        state: present
 
   tasks: 
     - name: "Start and enable services"
-      service: "name={{ item }} state=started enabled=yes"
-      with_items:
-        - postgresql
-        
+      service:
+        name: postgresql
+        state: started
+        enabled: yes
+
     - name: set postgresql listen addresses
       block:
       - name: get postgresql listen addresses
@@ -79,4 +100,6 @@
 
   handlers:
     - name: restart postgres
-      service: name=postgresql state=restarted
+      service:
+        name: postgresql
+        state: restarted
