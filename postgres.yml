@@ -53,7 +53,7 @@
     
       - name: configure postgresql listen addresses
         lineinfile:
-          dest: "/etc/postgresql/14/main/postgresql.conf"
+          dest: "/etc/postgresql/12/main/postgresql.conf"
           regexp: "^#?listen_addresses.+$"
           line: "listen_addresses = '{{ pgdg_ip_addresses }}'"
           state: present
@@ -87,7 +87,7 @@
 
     - name: "Allow md5 connection for the db user"
       postgresql_pg_hba:
-        dest: "/etc/postgresql/14/main/pg_hba.conf"
+        dest: "/etc/postgresql/12/main/pg_hba.conf"
         address: all
         contype: host
         databases: all
