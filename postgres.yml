@@ -2,7 +2,9 @@
 - hosts: all
   gather_facts: yes
   become: yes
-  become_user: sudo
+  become_method: sudo
+  become_user: root
+
   pre_tasks:
     - name: Check for held packages
       shell: sudo apt-mark showhold
