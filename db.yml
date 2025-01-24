@@ -1,21 +1,6 @@
 ---
 - hosts: all
   become: yes
-  become_method: sudo
-  become_user: root
- 
-  tasks:
-   - name: Install sudo package
-     apt:
-       name: sudo
-       state: present
-       update_cache: yes
-
-   - name: Install ACL package
-     apt:
-       name: acl
-       state: present
-       update_cache: yes
   vars:
     mongodb_version: "7.0"
     mongodb_packages:
@@ -24,12 +9,18 @@
       - mongodb-org-database
       - mongodb-org-tools
 
-    tasks:
-    - name: Install required system packages
+  tasks:
+    - name: Unhold any existing packages
+      shell: apt-mark unhold {{ item }} || true
+      loop: "{{ mongodb_packages }}"
+      ignore_errors: yes
+
+    - name: Install system prerequisites
       apt:
         pkg:
           - wget
           - gnupg
+          - software-properties-common
           - apt-transport-https
         state: present
         update_cache: yes
@@ -45,14 +36,9 @@
         state: present
         filename: mongodb-org
 
-    - name: Unhold any existing MongoDB packages
-      shell: apt-mark unhold {{ item }}
-      loop: "{{ mongodb_packages }}"
-      ignore_errors: yes
-
     - name: Clean package cache
-      apt:
-        clean: yes
+      command: apt-get clean
+      changed_when: false
 
     - name: Update package cache
       apt:
@@ -62,11 +48,12 @@
       apt:
         name: "{{ mongodb_packages }}"
         state: present
-        update_cache: yes
+        force: yes
 
-    - name: Hold MongoDB packages to prevent unintended upgrades
+    - name: Hold MongoDB packages
       shell: apt-mark hold {{ item }}
       loop: "{{ mongodb_packages }}"
+      ignore_errors: yes
 
     - name: Ensure MongoDB service is started and enabled
       systemd:
