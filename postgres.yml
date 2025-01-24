@@ -4,7 +4,7 @@
   become_method: sudo
   become_user: root
  
- tasks:
+  tasks:
    - name: Install sudo package
      apt:
        name: sudo
@@ -25,45 +25,41 @@
          - python3-pip
        state: present
        update_cache: yes
-   
+
    - name: Install Python PostgreSQL dependencies
      pip:
        name: psycopg2-binary
        state: present
-   
+
    - name: Ensure PostgreSQL service running
      systemd:
        name: postgresql
        state: started
        enabled: yes
-   
+
    - name: Create application database
      become_user: postgres
-     become: yes
      postgresql_db:
        name: demodb
        state: present
-   
+
    - name: Create database user
      become_user: postgres
-     become: yes
      postgresql_user:
        name: demouser
        password: demodb
        state: present
-   
+
    - name: Grant database privileges
      become_user: postgres
-     become: yes
      postgresql_privs:
        type: database
        database: demodb
        roles: demouser
        privs: ALL
-   
+
    - name: Configure PostgreSQL authentication
      become_user: postgres
-     become: yes
      postgresql_pg_hba:
        dest: "/etc/postgresql/12/main/pg_hba.conf"
        contype: host
@@ -72,8 +68,8 @@
        address: 0.0.0.0/0
        method: md5
        create: true
- 
- handlers:
+
+  handlers:
    - name: Restart PostgreSQL
      systemd:
        name: postgresql
