@@ -1,31 +1,66 @@
 ---
 - hosts: all
-  gather_facts: true
-  tasks:
-    - name: Check for held packages
-      shell: sudo apt-mark showhold
-      register: held_packages
-      changed_when: false
+  become: yes
+  vars:
+    mongodb_version: "7.0"
+    mongodb_packages:
+      - mongodb-org-server
+      - mongodb-org-mongos
+      - mongodb-org-database
+      - mongodb-org-tools
 
-    - name: Unhold any held packages
-      shell: sudo apt-mark unhold {{ item }}
-      loop: "{{ held_packages.stdout_lines }}"
-      when: held_packages.stdout_lines|length > 0
-      changed_when: true
+  tasks:
+    - name: Install required system packages
+      apt:
+        pkg:
+          - wget
+          - gnupg
+          - apt-transport-https
+        state: present
+        update_cache: yes
+
+    - name: Import MongoDB GPG key
+      apt_key:
+        url: "https://www.mongodb.org/static/pgp/server-{{ mongodb_version }}.asc"
+        state: present
+
+    - name: Add MongoDB repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/{{ mongodb_version }} multiverse"
+        state: present
+        filename: mongodb-org
+
+    - name: Unhold any existing MongoDB packages
+      shell: apt-mark unhold {{ item }}
+      loop: "{{ mongodb_packages }}"
+      ignore_errors: yes
 
     - name: Clean package cache
-      command: |
-        sudo apt-get clean
-        sudo apt-get update
-      changed_when: true
-
-    - name: Install required dependencies
       apt:
-        name:
-          - mongodb-org-database
+        clean: yes
+
+    - name: Update package cache
+      apt:
+        update_cache: yes
+
+    - name: Install MongoDB packages
+      apt:
+        name: "{{ mongodb_packages }}"
         state: present
-        update_cache: true
-      
-    - name: Include the mongodb role
-      include_role:
-        name: mongodb
+        update_cache: yes
+
+    - name: Hold MongoDB packages to prevent unintended upgrades
+      shell: apt-mark hold {{ item }}
+      loop: "{{ mongodb_packages }}"
+
+    - name: Ensure MongoDB service is started and enabled
+      systemd:
+        name: mongod
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: Restart MongoDB
+      systemd:
+        name: mongod
+        state: restarted
