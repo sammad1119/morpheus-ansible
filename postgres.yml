@@ -1,9 +1,7 @@
----
 - hosts: all
   become: yes
   become_method: sudo
   become_user: root
-  become_flags: '-i'
   
   tasks:
     - name: Install PostgreSQL packages
@@ -28,12 +26,14 @@
 
     - name: Create application database
       become_user: postgres
+      become: yes
       postgresql_db:
         name: demodb
         state: present
 
     - name: Create database user
       become_user: postgres
+      become: yes
       postgresql_user:
         name: demouser
         password: demodb
@@ -41,6 +41,7 @@
 
     - name: Grant database privileges
       become_user: postgres
+      become: yes
       postgresql_privs:
         type: database
         database: demodb
@@ -49,6 +50,7 @@
 
     - name: Configure PostgreSQL authentication
       become_user: postgres
+      become: yes
       postgresql_pg_hba:
         dest: "/etc/postgresql/12/main/pg_hba.conf"
         contype: host
