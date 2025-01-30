@@ -4,12 +4,6 @@
   become_method: sudo
   become_user: root
 
-  vars:
-    db_version: "{{ morpheus['customOptions']['dbaasVersion'] }}"
-    db_name: "{{ morpheus['customOptions']['dbName'] }}"
-    db_user: "{{ morpheus['customOptions']['dbaasUsername'] }}"
-    db_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
- 
   tasks:
    - name: Install required packages
      apt:
@@ -37,15 +31,15 @@
 
    - name: Create application database
      mysql_db:
-       name: "{{ db_name }}"
+       name: "demodb"
        state: present
        login_unix_socket: /var/run/mysqld/mysqld.sock
 
    - name: Create database user
      mysql_user:
-       name: "{{ db_user }}"
-       password: "{{ db_password }}"
-       priv: "{{ db_name }}.*:ALL"
+       name: "demouser"
+       password: "demopassword123"
+       priv: "demodb.*:ALL"
        host: '%'
        state: present
        login_unix_socket: /var/run/mysqld/mysqld.sock
