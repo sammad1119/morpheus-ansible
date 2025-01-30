@@ -3,6 +3,12 @@
   become: yes
   become_method: sudo
   become_user: root
+
+  vars:
+    db_version: "{{ morpheus['customOptions']['dbaasVersion'] }}"
+    db_name: "{{ morpheus['customOptions']['dbName'] }}"
+    db_user: "{{ morpheus['customOptions']['dbaasUsername'] }}"
+    db_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
  
   tasks:
    - name: Install required packages
@@ -38,8 +44,8 @@
    - name: Install PostgreSQL packages
      apt:
        pkg:
-         - "postgresql-<%=customOptions.dbaasVersion%>"
-         - "postgresql-contrib-<%=customOptions.dbaasVersion%>"
+         - "postgresql-{{ db_version }}"
+         - "postgresql-contrib-{{ db_version }}"
          - python3-pip
        state: present
        update_cache: yes
@@ -58,31 +64,31 @@
    - name: Create application database
      become_user: postgres
      postgresql_db:
-       name: "<%=customOptions.dbName%>"
+       name: "{{ db_name }}"
        state: present
 
    - name: Create database user
      become_user: postgres
      postgresql_user:
-       name: "<%=customOptions.dbaasUsername%>"
-       password: "<%=customOptions.dbaasPassword%>"
+       name: "{{ db_user }}"
+       password: "{{ db_password }}"
        state: present
 
    - name: Grant database privileges
      become_user: postgres
      postgresql_privs:
        type: database
-       database: "<%=customOptions.dbName%>"
-       roles: "<%=customOptions.dbaasUsername%>"
+       database: "{{ db_name }}"
+       roles: "{{ db_user }}"
        privs: ALL
 
    - name: Configure PostgreSQL authentication
      become_user: postgres
      postgresql_pg_hba:
-       dest: "/etc/postgresql/<%=customOptions.dbaasVersion%>/main/pg_hba.conf"
+       dest: "/etc/postgresql/{{ db_version }}/main/pg_hba.conf"
        contype: host
        databases: all
-       users: "<%=customOptions.dbaasUsername%>"
+       users: "{{ db_user }}"
        address: 0.0.0.0/0
        method: md5
        create: true
