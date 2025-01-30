@@ -20,8 +20,8 @@
    - name: Install PostgreSQL packages
      apt:
        pkg:
-         - postgresql-12
-         - postgresql-contrib-12
+         - postgresql-15
+         - postgresql-contrib-15
          - python3-pip
        state: present
        update_cache: yes
@@ -61,7 +61,7 @@
    - name: Configure PostgreSQL authentication
      become_user: postgres
      postgresql_pg_hba:
-       dest: "/etc/postgresql/12/main/pg_hba.conf"
+       dest: "/etc/postgresql/15/main/pg_hba.conf"
        contype: host
        databases: all
        users: demouser
