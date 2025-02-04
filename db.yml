@@ -2,7 +2,10 @@
 - hosts: all
   become: yes
   vars:
-    mongodb_version: "7.0"
+    dbaas_version: "{{ morpheus['customOptions']['dbaasVersion'] }}"
+    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] }}"
+    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
+    db_name: "{{ morpheus['customOptions']['dbName'] }}"
     mongodb_packages:
       - mongodb-org-server
       - mongodb-org-mongos
@@ -22,17 +25,23 @@
           - gnupg
           - software-properties-common
           - apt-transport-https
+          - python3-pip
         state: present
         update_cache: yes
 
+    - name: Install pymongo
+      pip:
+        name: pymongo
+        state: present
+
     - name: Import MongoDB GPG key
       apt_key:
-        url: "https://www.mongodb.org/static/pgp/server-{{ mongodb_version }}.asc"
+        url: "https://www.mongodb.org/static/pgp/server-{{ dbaas_version }}.asc"
         state: present
 
     - name: Add MongoDB repository
       apt_repository:
-        repo: "deb [arch=amd64] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/{{ mongodb_version }} multiverse"
+        repo: "deb [arch=amd64] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/{{ dbaas_version }} multiverse"
         state: present
         filename: mongodb-org
 
@@ -60,6 +69,37 @@
         name: mongod
         state: started
         enabled: yes
+
+    - name: Wait for MongoDB to start
+      wait_for:
+        port: 27017
+        delay: 10
+        timeout: 30
+
+    - name: Create MongoDB admin user
+      mongodb_user:
+        database: admin
+        name: "{{ dbaas_username }}"
+        password: "{{ dbaas_password }}"
+        roles:
+          - role: root
+            db: admin
+        state: present
+
+    - name: Create application database
+      mongodb_db:
+        name: "{{ db_name }}"
+        state: present
+        login_user: "{{ dbaas_username }}"
+        login_password: "{{ dbaas_password }}"
+        login_database: admin
+
+    - name: Update MongoDB configuration for remote access
+      lineinfile:
+        path: /etc/mongod.conf
+        regexp: '  bindIp: 127.0.0.1'
+        line: '  bindIp: 0.0.0.0'
+      notify: Restart MongoDB
 
   handlers:
     - name: Restart MongoDB
