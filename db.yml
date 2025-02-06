@@ -13,10 +13,17 @@
       - mongodb-org-tools
 
   tasks:
-    - name: Unhold any existing packages
-      shell: apt-mark unhold {{ item }} || true
-      loop: "{{ mongodb_packages }}"
-      ignore_errors: yes
+    - name: Add libssl1.1 repository
+      apt_repository:
+        repo: deb http://security.ubuntu.com/ubuntu focal-security main
+        state: present
+        filename: focal-security
+
+    - name: Install libssl1.1
+      apt:
+        name: libssl1.1
+        state: present
+        update_cache: yes
 
     - name: Install system prerequisites
       apt:
@@ -26,15 +33,9 @@
           - software-properties-common
           - apt-transport-https
           - python3-pip
+          - ca-certificates
         state: present
         update_cache: yes
-
-    - name: Install required Python packages
-      pip:
-        name:
-          - pymongo
-          - "pymongo[srv]"
-        state: present
 
     - name: Import MongoDB GPG key
       apt_key:
@@ -46,25 +47,15 @@
         repo: "deb [arch=amd64] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/{{ dbaas_version }} multiverse"
         state: present
         filename: mongodb-org
-
-    - name: Clean package cache
-      command: apt-get clean
-      changed_when: false
-
-    - name: Update package cache
-      apt:
         update_cache: yes
 
     - name: Install MongoDB packages
       apt:
         name: "{{ mongodb_packages }}"
         state: present
-        force: yes
-
-    - name: Hold MongoDB packages
-      shell: apt-mark hold {{ item }}
-      loop: "{{ mongodb_packages }}"
-      ignore_errors: yes
+        allow_downgrade: yes
+        allow_change_held_packages: yes
+        update_cache: yes
 
     - name: Ensure MongoDB service is started and enabled
       systemd:
