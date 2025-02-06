@@ -8,6 +8,7 @@
     dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] }}"
     dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
     db_name: "{{ morpheus['customOptions']['dbName'] }}"
+    ansible_python_interpreter: /usr/bin/python3
  
   tasks:
    - name: Install required packages
@@ -17,19 +18,27 @@
          - acl
          - python3-pip
          - python3-mysqldb
+         - gnupg
        state: present
        update_cache: yes
+
+   - name: Download MySQL APT key
+     get_url:
+       url: https://repo.mysql.com/RPM-GPG-KEY-mysql
+       dest: /tmp/mysql_pubkey.asc
+       mode: '0644'
+
+   - name: Import MySQL APT key
+     apt_key:
+       file: /tmp/mysql_pubkey.asc
+       state: present
 
    - name: Add MySQL APT repository
      apt_repository:
        repo: 'deb http://repo.mysql.com/apt/ubuntu/ {{ ansible_distribution_release }} mysql-{{ dbaas_version }}'
        state: present
        filename: mysql
-
-   - name: Add MySQL APT key
-     apt_key:
-       url: https://repo.mysql.com/RPM-GPG-KEY-mysql
-       state: present
+       update_cache: yes
 
    - name: Install MySQL Server with specific version
      apt:
