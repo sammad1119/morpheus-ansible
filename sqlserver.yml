@@ -1,0 +1,107 @@
+---
+- hosts: all
+  become: yes
+  become_method: sudo
+  become_user: root
+
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - sudo
+          - curl
+          - gnupg2
+        state: present
+        update_cache: yes
+
+    - name: Import Microsoft GPG key
+      apt_key:
+        url: https://packages.microsoft.com/keys/microsoft.asc
+        state: present
+
+    - name: Add Microsoft SQL Server repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://packages.microsoft.com/ubuntu/22.04/mssql-server-2022 jammy main"
+        state: present
+        filename: mssql-server
+        update_cache: yes
+
+    - name: Add Microsoft repository for SQL Server tools
+      apt_repository:
+        repo: "deb [arch=amd64] https://packages.microsoft.com/ubuntu/22.04/prod jammy main"
+        state: present
+        filename: msprod
+        update_cache: yes
+
+    - name: Install SQL Server
+      shell: |
+        ACCEPT_EULA=Y MSSQL_SA_PASSWORD="MyStr0ngPassw0rd!" apt-get install -y mssql-server
+
+    - name: Install SQL Server tools
+      apt:
+        name:
+          - mssql-tools
+          - unixodbc-dev
+        state: present
+      environment:
+        ACCEPT_EULA: "Y"
+
+    - name: Add SQL Server tools to PATH
+      lineinfile:
+        path: /etc/profile.d/mssql-tools.sh
+        line: 'export PATH="$PATH:/opt/mssql-tools/bin"'
+        create: yes
+        mode: '0644'
+
+    - name: Configure SQL Server
+      shell: |
+        /opt/mssql/bin/mssql-conf setup accept-eula
+      environment:
+        MSSQL_SA_PASSWORD: "MyStr0ngPassw0rd!"
+        MSSQL_PID: "Developer"
+        ACCEPT_EULA: "Y"
+
+    - name: Ensure SQL Server is running
+      systemd:
+        name: mssql-server
+        state: started
+        enabled: yes
+
+    - name: Create test database
+      shell: |
+        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "MyStr0ngPassw0rd!" -Q "CREATE DATABASE TestDB"
+      register: create_db
+      failed_when: create_db.rc != 0 and "There is already an object named" not in create_db.stderr
+
+    - name: Create test user
+      shell: |
+        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "MyStr0ngPassw0rd!" -Q "
+        IF NOT EXISTS (SELECT name FROM sys.sql_logins WHERE name = 'testuser')
+        BEGIN
+            CREATE LOGIN testuser WITH PASSWORD = 'TestUser123!';
+        END;
+        USE TestDB;
+        IF NOT EXISTS (SELECT name FROM sys.database_principals WHERE name = 'testuser')
+        BEGIN
+            CREATE USER testuser FOR LOGIN testuser;
+            ALTER ROLE db_owner ADD MEMBER testuser;
+        END;"
+
+    - name: Enable remote connections
+      shell: |
+        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "MyStr0ngPassw0rd!" -Q "
+        sp_configure 'remote access', 1;
+        RECONFIGURE WITH OVERRIDE;
+        GO"
+
+    - name: Open SQL Server port
+      ufw:
+        rule: allow
+        port: 1433
+        proto: tcp
+
+  handlers:
+    - name: Restart SQL Server
+      systemd:
+        name: mssql-server
+        state: restarted
