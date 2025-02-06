@@ -18,23 +18,15 @@
          - acl
          - python3-pip
          - python3-mysqldb
-         - gnupg
-         - curl
        state: present
        update_cache: yes
 
-   - name: Download and import MySQL APT key
+   - name: Add MySQL Repository
      shell: |
-       curl -fsSL https://repo.mysql.com/RPM-GPG-KEY-mysql-2022 | gpg --dearmor -o /usr/share/keyrings/mysql.gpg
+       echo "deb http://repo.mysql.com/apt/ubuntu {{ ansible_distribution_release }} mysql-{{ dbaas_version }}" | tee /etc/apt/sources.list.d/mysql.list
+       apt-get update --allow-unauthenticated
      args:
-       creates: /usr/share/keyrings/mysql.gpg
-
-   - name: Add MySQL APT repository
-     apt_repository:
-       repo: "deb [signed-by=/usr/share/keyrings/mysql.gpg] http://repo.mysql.com/apt/ubuntu/ {{ ansible_distribution_release }} mysql-{{ dbaas_version }}"
-       state: present
-       filename: mysql
-       update_cache: yes
+       creates: /etc/apt/sources.list.d/mysql.list
 
    - name: Install MySQL Server with specific version
      apt:
@@ -43,6 +35,7 @@
          - mysql-client={{ dbaas_version }}*
        state: present
        update_cache: yes
+       allow_unauthenticated: yes
 
    - name: Ensure MySQL is running
      systemd:
