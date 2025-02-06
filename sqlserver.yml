@@ -53,6 +53,11 @@
         create: yes
         mode: '0644'
 
+    - name: Stop SQL Server before configuration
+      systemd:
+        name: mssql-server
+        state: stopped
+
     - name: Configure SQL Server
       shell: |
         /opt/mssql/bin/mssql-conf setup accept-eula
@@ -61,11 +66,16 @@
         MSSQL_PID: "Developer"
         ACCEPT_EULA: "Y"
 
-    - name: Ensure SQL Server is running
+    - name: Start SQL Server
       systemd:
         name: mssql-server
         state: started
         enabled: yes
+
+    - name: Wait for SQL Server to be ready
+      wait_for:
+        port: 1433
+        timeout: 60
 
     - name: Create test database
       shell: |
