@@ -11,31 +11,67 @@
       - mongodb-org-mongos
       - mongodb-org-database
       - mongodb-org-tools
-
+      - mongodb-org-shell
+    system_dependencies:
+      - wget
+      - gnupg
+      - software-properties-common
+      - apt-transport-https
+      - python3-pip
+      - ca-certificates
+      - curl
+      - libcurl4
+      - openssl
+      - liblzma5
+      - libssl1.1
+      - libsasl2-2
+      - libsasl2-modules
+      - libsasl2-modules-db
+      - numactl
+      - libsnmp40
+      - libgssapi-krb5-2
+      - libldap-2.4-2
+      - libwrap0
+      - libpcap0.8
   tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
     - name: Add libssl1.1 repository
       apt_repository:
         repo: deb http://security.ubuntu.com/ubuntu focal-security main
         state: present
         filename: focal-security
 
-    - name: Install libssl1.1
+    - name: Install all system dependencies
       apt:
-        name: libssl1.1
+        name: "{{ system_dependencies }}"
         state: present
         update_cache: yes
 
-    - name: Install system prerequisites
-      apt:
-        pkg:
-          - wget
-          - gnupg
-          - software-properties-common
-          - apt-transport-https
-          - python3-pip
-          - ca-certificates
-        state: present
-        update_cache: yes
+    - name: Create required directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /var/lib/mongodb
+        - /var/log/mongodb
+        - /etc/mongodb
+
+    - name: Set directory permissions
+      file:
+        path: "{{ item }}"
+        owner: mongodb
+        group: mongodb
+        recurse: yes
+      loop:
+        - /var/lib/mongodb
+        - /var/log/mongodb
+        - /etc/mongodb
+      ignore_errors: yes
 
     - name: Import MongoDB GPG key
       apt_key:
@@ -57,11 +93,21 @@
         allow_change_held_packages: yes
         update_cache: yes
 
+    - name: Create MongoDB configuration file
+      template:
+        src: mongod.conf.j2
+        dest: /etc/mongod.conf
+        owner: mongodb
+        group: mongodb
+        mode: '0644'
+      notify: Restart MongoDB
+
     - name: Ensure MongoDB service is started and enabled
       systemd:
         name: mongod
         state: started
         enabled: yes
+        daemon_reload: yes
 
     - name: Wait for MongoDB to start
       wait_for:
@@ -71,7 +117,7 @@
 
     - name: Create MongoDB admin user
       shell: |
-        mongosh admin --eval '
+        mongo admin --eval '
         db.createUser({
           user: "{{ dbaas_username }}",
           pwd: "{{ dbaas_password }}",
@@ -81,19 +127,63 @@
 
     - name: Create application database
       shell: |
-        mongosh admin -u "{{ dbaas_username }}" -p "{{ dbaas_password }}" --eval '
+        mongo admin -u "{{ dbaas_username }}" -p "{{ dbaas_password }}" --eval '
         db.getSiblingDB("{{ db_name }}").createCollection("init")'
       ignore_errors: yes
 
-    - name: Update MongoDB configuration for remote access
-      lineinfile:
+    - name: Configure MongoDB for authentication and remote access
+      blockinfile:
         path: /etc/mongod.conf
-        regexp: '  bindIp: 127.0.0.1'
-        line: '  bindIp: 0.0.0.0'
+        backup: yes
+        block: |
+          security:
+            authorization: enabled
+          net:
+            bindIp: 0.0.0.0
+            port: 27017
+          storage:
+            dbPath: /var/lib/mongodb
+          systemLog:
+            destination: file
+            path: /var/log/mongodb/mongod.log
+            logAppend: true
+          processManagement:
+            timeZoneInfo: /usr/share/zoneinfo
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
       notify: Restart MongoDB
+
+    - name: Set kernel parameters for MongoDB
+      sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        sysctl_file: /etc/sysctl.d/99-mongodb.conf
+      with_items:
+        - { key: "vm.swappiness", value: "1" }
+        - { key: "net.core.somaxconn", value: "4096" }
+        - { key: "net.ipv4.tcp_fin_timeout", value: "30" }
+        - { key: "net.ipv4.tcp_keepalive_time", value: "300" }
+        - { key: "net.ipv4.tcp_keepalive_intvl", value: "30" }
+        - { key: "net.ipv4.tcp_keepalive_probes", value: "9" }
+
+    - name: Apply sysctl settings
+      command: sysctl -p /etc/sysctl.d/99-mongodb.conf
+
+    - name: Set ulimit for MongoDB
+      pam_limits:
+        domain: mongodb
+        limit_type: "{{ item.limit_type }}"
+        limit_item: "{{ item.limit_item }}"
+        value: "{{ item.value }}"
+      with_items:
+        - { limit_type: '-', limit_item: 'nofile', value: '64000' }
+        - { limit_type: '-', limit_item: 'nproc', value: '64000' }
+        - { limit_type: '-', limit_item: 'memlock', value: 'unlimited' }
+        - { limit_type: '-', limit_item: 'as', value: 'unlimited' }
 
   handlers:
     - name: Restart MongoDB
       systemd:
         name: mongod
         state: restarted
+        daemon_reload: yes
