@@ -3,7 +3,6 @@
   become: yes
   become_method: sudo
   become_user: root
-
   vars:
     dbaas_version: "{{ morpheus['customOptions']['dbaasVersion'] }}"
     dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] }}"
@@ -21,11 +20,22 @@
        state: present
        update_cache: yes
 
-   - name: Install MySQL Server
+   - name: Add MySQL APT repository
+     apt_repository:
+       repo: 'deb http://repo.mysql.com/apt/ubuntu/ {{ ansible_distribution_release }} mysql-{{ dbaas_version }}'
+       state: present
+       filename: mysql
+
+   - name: Add MySQL APT key
+     apt_key:
+       url: https://repo.mysql.com/RPM-GPG-KEY-mysql
+       state: present
+
+   - name: Install MySQL Server with specific version
      apt:
        pkg:
-         - mysql-server
-         - mysql-client
+         - mysql-server={{ dbaas_version }}*
+         - mysql-client={{ dbaas_version }}*
        state: present
        update_cache: yes
 
