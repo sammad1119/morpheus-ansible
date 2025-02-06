@@ -19,23 +19,19 @@
          - python3-pip
          - python3-mysqldb
          - gnupg
+         - curl
        state: present
        update_cache: yes
 
-   - name: Download MySQL APT key
-     get_url:
-       url: https://repo.mysql.com/RPM-GPG-KEY-mysql
-       dest: /tmp/mysql_pubkey.asc
-       mode: '0644'
-
-   - name: Import MySQL APT key
-     apt_key:
-       file: /tmp/mysql_pubkey.asc
-       state: present
+   - name: Download and import MySQL APT key
+     shell: |
+       curl -fsSL https://repo.mysql.com/RPM-GPG-KEY-mysql-2022 | gpg --dearmor -o /usr/share/keyrings/mysql.gpg
+     args:
+       creates: /usr/share/keyrings/mysql.gpg
 
    - name: Add MySQL APT repository
      apt_repository:
-       repo: 'deb http://repo.mysql.com/apt/ubuntu/ {{ ansible_distribution_release }} mysql-{{ dbaas_version }}'
+       repo: "deb [signed-by=/usr/share/keyrings/mysql.gpg] http://repo.mysql.com/apt/ubuntu/ {{ ansible_distribution_release }} mysql-{{ dbaas_version }}"
        state: present
        filename: mysql
        update_cache: yes
