@@ -3,12 +3,12 @@
   become: yes
   become_method: sudo
   become_user: root
-
   vars:
     db_version: "{{ morpheus['customOptions']['dbaasVersion'] }}"
     db_name: "{{ morpheus['customOptions']['dbName'] }}"
     db_user: "{{ morpheus['customOptions']['dbaasUsername'] }}"
     db_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
+    db_root_password: "{{ morpheus['customOptions']['dbRootPassword'] }}"
  
   tasks:
    - name: Install required packages
@@ -21,26 +21,22 @@
          - curl
        state: present
        update_cache: yes
-
    - name: Create keyrings directory
      file:
        path: /etc/apt/keyrings
        state: directory
        mode: '0755'
-
    - name: Add PostgreSQL signing key
      shell: |
        curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg
      args:
        creates: /etc/apt/keyrings/postgresql.gpg
-
    - name: Add PostgreSQL repository
      apt_repository:
        repo: "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
        state: present
        filename: postgresql
        update_cache: yes
-
    - name: Install PostgreSQL packages
      apt:
        pkg:
@@ -49,41 +45,42 @@
          - python3-pip
        state: present
        update_cache: yes
-
    - name: Install Python PostgreSQL dependencies
      pip:
        name: psycopg2-binary
        state: present
-
    - name: Ensure PostgreSQL service running
      systemd:
        name: postgresql
        state: started
        enabled: yes
-
-   - name: Create application database
+   - name: Set PostgreSQL root password
      become_user: postgres
+     postgresql_user:
+       name: root
+       password: "{{ db_root_password }}"
+       role_attr_flags: SUPERUSER,CREATEDB,CREATEROLE,INHERIT,LOGIN
+       state: present
+   - name: Create application database
+     become_user: root
      postgresql_db:
        name: "{{ db_name }}"
        state: present
-
    - name: Create database user
-     become_user: postgres
+     become_user: root
      postgresql_user:
        name: "{{ db_user }}"
        password: "{{ db_password }}"
        state: present
-
    - name: Grant database privileges
-     become_user: postgres
+     become_user: root
      postgresql_privs:
        type: database
        database: "{{ db_name }}"
        roles: "{{ db_user }}"
        privs: ALL
-
    - name: Configure PostgreSQL authentication
-     become_user: postgres
+     become_user: root
      postgresql_pg_hba:
        dest: "/etc/postgresql/{{ db_version }}/main/pg_hba.conf"
        contype: host
@@ -93,7 +90,6 @@
        method: md5
        create: true
      notify: Restart PostgreSQL
-
   handlers:
    - name: Restart PostgreSQL
      systemd:
