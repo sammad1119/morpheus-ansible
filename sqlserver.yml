@@ -9,11 +9,11 @@
       "14.0": "2017"
       "15.0": "2019"
       "16.0": "2022"
-    morpheus_db_version: "<%= customOptions.dbaasVersion %>"
-    morpheus_db_name: "<%= customOptions.dbName %>"
-    morpheus_db_user: "<%= customOptions.dbaasUsername %>"
-    morpheus_db_password: "<%= customOptions.dbaasPassword %>"
-    morpheus_root_password: "<%= customOptions.dbRootPassword %>"
+    morpheus_db_version: "<%= instance.customOptions.dbaasVersion %>"
+    morpheus_db_name: "<%= instance.customOptions.dbName %>"
+    morpheus_db_user: "<%= instance.customOptions.dbaasUsername %>"
+    morpheus_db_password: "<%= instance.customOptions.dbaasPassword %>"
+    morpheus_root_password: "<%= instance.customOptions.dbRootPassword %>"
   tasks:
     - name: Install required packages
       apt:
