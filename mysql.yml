@@ -37,9 +37,9 @@
  
    - name: Install MySQL Server
      apt:
-       pkg:
-         - "mysql-server={{ dbaas_version }}*"
-         - "mysql-client={{ dbaas_version }}*"
+       name:
+         - mysql-server
+         - mysql-client
        state: present
        update_cache: yes
  
