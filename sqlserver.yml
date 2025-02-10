@@ -3,17 +3,7 @@
   become: yes
   become_method: sudo
   become_user: root
-  vars:
-    sql_version_map:
-      "13.0": "2016"
-      "14.0": "2017"
-      "15.0": "2019"
-      "16.0": "2022"
-    morpheus_db_version: "<%= instance.customOptions.dbaasVersion %>"
-    morpheus_db_name: "<%= instance.customOptions.dbName %>"
-    morpheus_db_user: "<%= instance.customOptions.dbaasUsername %>"
-    morpheus_db_password: "<%= instance.customOptions.dbaasPassword %>"
-    morpheus_root_password: "<%= instance.customOptions.dbRootPassword %>"
+ 
   tasks:
     - name: Install required packages
       apt:
@@ -23,34 +13,30 @@
           - gnupg2
         state: present
         update_cache: yes
-
+ 
     - name: Import Microsoft GPG key
       apt_key:
         url: https://packages.microsoft.com/keys/microsoft.asc
         state: present
-
-    - name: Set SQL Server version
-      set_fact:
-        sql_version: "{{ sql_version_map[morpheus_db_version] | default('2022') }}"
-
+ 
     - name: Add Microsoft SQL Server repository
       apt_repository:
-        repo: "deb [arch=amd64] https://packages.microsoft.com/ubuntu/22.04/mssql-server-{{ sql_version }} jammy main"
+        repo: "deb [arch=amd64] https://packages.microsoft.com/ubuntu/22.04/mssql-server-2022 jammy main"
         state: present
         filename: mssql-server
         update_cache: yes
-
+ 
     - name: Add Microsoft repository for SQL Server tools
       apt_repository:
         repo: "deb [arch=amd64] https://packages.microsoft.com/ubuntu/22.04/prod jammy main"
         state: present
         filename: msprod
         update_cache: yes
-
+ 
     - name: Install SQL Server
       shell: |
-        ACCEPT_EULA=Y MSSQL_SA_PASSWORD="{{ morpheus_root_password }}" apt-get install -y mssql-server
-
+        ACCEPT_EULA=Y MSSQL_SA_PASSWORD="MyStr0ngPassw0rd!" apt-get install -y mssql-server
+ 
     - name: Install SQL Server tools
       apt:
         name:
@@ -59,73 +45,74 @@
         state: present
       environment:
         ACCEPT_EULA: "Y"
-
+ 
     - name: Add SQL Server tools to PATH
       lineinfile:
         path: /etc/profile.d/mssql-tools.sh
         line: 'export PATH="$PATH:/opt/mssql-tools/bin"'
         create: yes
         mode: '0644'
-
+ 
     - name: Stop SQL Server before configuration
       systemd:
         name: mssql-server
         state: stopped
-
+ 
     - name: Configure SQL Server
       shell: |
         /opt/mssql/bin/mssql-conf setup accept-eula
       environment:
-        MSSQL_SA_PASSWORD: "{{ morpheus_root_password }}"
+        MSSQL_SA_PASSWORD: "MyStr0ngPassw0rd!"
         MSSQL_PID: "Developer"
         ACCEPT_EULA: "Y"
-
+ 
     - name: Start SQL Server
       systemd:
         name: mssql-server
         state: started
         enabled: yes
-
+ 
     - name: Wait for SQL Server to be ready
       wait_for:
         port: 1433
         timeout: 60
-
-    - name: Create database
+ 
+    - name: Create test database
       shell: |
-        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "{{ morpheus_root_password }}" -Q "CREATE DATABASE {{ morpheus_db_name }}"
+        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "MyStr0ngPassw0rd!" -Q "CREATE DATABASE TestDB"
       register: create_db
       failed_when: create_db.rc != 0 and "There is already an object named" not in create_db.stderr
-
-    - name: Create database user
+ 
+    - name: Create test user
       shell: |
-        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "{{ morpheus_root_password }}" -Q "
-        IF NOT EXISTS (SELECT name FROM sys.sql_logins WHERE name = '{{ morpheus_db_user }}')
+        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "MyStr0ngPassw0rd!" -Q "
+        IF NOT EXISTS (SELECT name FROM sys.sql_logins WHERE name = 'testuser')
         BEGIN
-            CREATE LOGIN {{ morpheus_db_user }} WITH PASSWORD = '{{ morpheus_db_password }}';
+            CREATE LOGIN testuser WITH PASSWORD = 'TestUser123!';
         END;
-        USE {{ morpheus_db_name }};
-        IF NOT EXISTS (SELECT name FROM sys.database_principals WHERE name = '{{ morpheus_db_user }}')
+        USE TestDB;
+        IF NOT EXISTS (SELECT name FROM sys.database_principals WHERE name = 'testuser')
         BEGIN
-            CREATE USER {{ morpheus_db_user }} FOR LOGIN {{ morpheus_db_user }};
-            ALTER ROLE db_owner ADD MEMBER {{ morpheus_db_user }};
+            CREATE USER testuser FOR LOGIN testuser;
+            ALTER ROLE db_owner ADD MEMBER testuser;
         END;"
-
+ 
     - name: Enable remote connections
       shell: |
-        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "{{ morpheus_root_password }}" -Q "
+        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "MyStr0ngPassw0rd!" -Q "
         sp_configure 'remote access', 1;
         RECONFIGURE WITH OVERRIDE;
         GO"
-
+ 
     - name: Open SQL Server port
       ufw:
         rule: allow
         port: 1433
         proto: tcp
-
+ 
   handlers:
     - name: Restart SQL Server
       systemd:
         name: mssql-server
         state: restarted
+ 
