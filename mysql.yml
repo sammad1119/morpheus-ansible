@@ -14,9 +14,9 @@
     default_dbname: "mysql"
     
     # Use custom inputs if defined, otherwise use defaults
-    dbaas_username: "<%=customOptions.dbaasUsername%>" | default(default_username)
-    dbaas_password: "<%=customOptions.dbaasPassword%>" | default(default_password)
-    db_name: "<%=customOptions.dbName%>" | default(default_dbname) | regex_replace('[^a-zA-Z0-9_]', '_')
+    dbaas_username: "{{ '<%=customOptions.dbaasUsername%>' | default(default_username) }}"
+    dbaas_password: "{{ '<%=customOptions.dbaasPassword%>' | default(default_password) }}"
+    db_name: "{{ '<%=customOptions.dbName%>' | default(default_dbname) }}"
 
   pre_tasks:
     - name: Verify database version is provided
@@ -38,8 +38,8 @@
    - name: Install MySQL Server
      apt:
        pkg:
-         - mysql-server={{ dbaas_version }}*
-         - mysql-client={{ dbaas_version }}*
+         - "mysql-server={{ dbaas_version }}*"
+         - "mysql-client={{ dbaas_version }}*"
        state: present
        update_cache: yes
  
