@@ -7,17 +7,34 @@
     dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
     db_name: "{{ morpheus['customOptions']['dbName'] }}"
     mongodb_packages:
+      - mongodb-org
       - mongodb-org-server
       - mongodb-org-mongos
-      - mongodb-org-database
+      - mongodb-org-shell
       - mongodb-org-tools
- 
+
   tasks:
-    - name: Unhold any existing packages
-      shell: apt-mark unhold {{ item }} || true
-      loop: "{{ mongodb_packages }}"
-      ignore_errors: yes
- 
+    - name: Check MongoDB version
+      fail:
+        msg: "Unsupported MongoDB version. Supported versions are 5.0, 6.0, and 8.0"
+      when: dbaas_version not in ['5.0', '6.0', '8.0']
+
+    - name: Install SSL dependencies for Ubuntu
+      apt:
+        name:
+          - ca-certificates
+          - libssl1.1
+        state: present
+        allow_downgrade: yes
+      when: dbaas_version in ['5.0', '6.0']
+
+    - name: Add SSL repository for Ubuntu 20.04
+      apt_repository:
+        repo: deb http://security.ubuntu.com/ubuntu focal-security main
+        state: present
+        filename: focal-security
+      when: dbaas_version in ['5.0', '6.0']
+
     - name: Install system prerequisites
       apt:
         pkg:
@@ -28,56 +45,66 @@
           - python3-pip
         state: present
         update_cache: yes
- 
+
     - name: Install required Python packages
       pip:
         name:
           - pymongo
           - "pymongo[srv]"
         state: present
- 
+
     - name: Import MongoDB GPG key
       apt_key:
         url: "https://www.mongodb.org/static/pgp/server-{{ dbaas_version }}.asc"
         state: present
- 
+
     - name: Add MongoDB repository
       apt_repository:
         repo: "deb [arch=amd64] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/{{ dbaas_version }} multiverse"
         state: present
         filename: mongodb-org
- 
-    - name: Clean package cache
-      command: apt-get clean
-      changed_when: false
- 
+
     - name: Update package cache
       apt:
         update_cache: yes
- 
+
+    - name: Unhold any existing MongoDB packages
+      shell: apt-mark unhold {{ item }} || true
+      loop: "{{ mongodb_packages }}"
+      ignore_errors: yes
+
+    - name: Remove existing MongoDB packages
+      apt:
+        name: "{{ mongodb_packages }}"
+        state: absent
+        purge: yes
+      ignore_errors: yes
+
     - name: Install MongoDB packages
       apt:
         name: "{{ mongodb_packages }}"
         state: present
-        force: yes
- 
+        allow_downgrades: yes
+        allow_unauthenticated: yes
+        dpkg_options: 'force-confnew,force-confdef'
+
     - name: Hold MongoDB packages
       shell: apt-mark hold {{ item }}
       loop: "{{ mongodb_packages }}"
       ignore_errors: yes
- 
+
     - name: Ensure MongoDB service is started and enabled
       systemd:
         name: mongod
         state: started
         enabled: yes
- 
+
     - name: Wait for MongoDB to start
       wait_for:
         port: 27017
         delay: 10
         timeout: 30
- 
+
     - name: Create MongoDB admin user
       shell: |
         mongosh admin --eval '
@@ -87,23 +114,22 @@
           roles: [ { role: "root", db: "admin" } ]
         });'
       ignore_errors: yes
- 
+
     - name: Create application database
       shell: |
         mongosh admin -u "{{ dbaas_username }}" -p "{{ dbaas_password }}" --eval '
         db.getSiblingDB("{{ db_name }}").createCollection("init")'
       ignore_errors: yes
- 
+
     - name: Update MongoDB configuration for remote access
       lineinfile:
         path: /etc/mongod.conf
         regexp: '  bindIp: 127.0.0.1'
         line: '  bindIp: 0.0.0.0'
       notify: Restart MongoDB
- 
+
   handlers:
     - name: Restart MongoDB
       systemd:
         name: mongod
         state: restarted
- 
