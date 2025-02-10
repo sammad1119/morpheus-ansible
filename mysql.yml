@@ -5,34 +5,15 @@
   become_user: root
  
   vars:
-    # Required field
-    dbaas_version: "<%=customOptions.dbaasVersion%>"
-    
-    # Default superuser values if no custom inputs provided
+    # Default superuser values if no custom inputs
     default_username: "root"
     default_password: "root"
     default_dbname: "mysql"
     
     # Use custom inputs if defined, otherwise use defaults
-    dbaas_username: "<%=customOptions.dbaasUsername%>"
-    dbaas_password: "<%=customOptions.dbaasPassword%>"
-    db_name: "<%=customOptions.dbName%>"
-
-  pre_tasks:
-    - name: Verify database version is provided
-      fail:
-        msg: "Database version is required"
-      when: not dbaas_version or dbaas_version == ''
-
-    - name: Set default values if inputs are empty
-      set_fact:
-        dbaas_username: "{{ default_username if not dbaas_username or dbaas_username == '' }}"
-        dbaas_password: "{{ default_password if not dbaas_password or dbaas_password == '' }}"
-        db_name: "{{ default_dbname if not db_name or db_name == '' }}"
-
-    - name: Set privileges based on user type
-      set_fact:
-        user_privileges: "{{ '*.*:ALL,GRANT' if dbaas_username == default_username else db_name + '.*:ALL' }}"
+    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] | default(default_username) }}"
+    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] | default(default_password) }}"
+    db_name: "{{ morpheus['customOptions']['dbName'] | default(default_dbname) }}"
  
   tasks:
    - name: Install required packages
@@ -47,7 +28,7 @@
  
    - name: Install MySQL Server
      apt:
-       name:
+       pkg:
          - mysql-server
          - mysql-client
        state: present
@@ -64,13 +45,12 @@
        name: "{{ db_name }}"
        state: present
        login_unix_socket: /var/run/mysqld/mysqld.sock
-     when: db_name != "mysql"
  
    - name: Create database user
      mysql_user:
        name: "{{ dbaas_username }}"
        password: "{{ dbaas_password }}"
-       priv: "{{ user_privileges }}"
+       priv: "{{ '*.*:ALL,GRANT' if dbaas_username == 'root' else db_name + '.*:ALL' }}"
        host: '%'
        state: present
        login_unix_socket: /var/run/mysqld/mysqld.sock
