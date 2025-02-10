@@ -5,10 +5,25 @@
   become_user: root
  
   vars:
+    # Required field
     dbaas_version: "{{ morpheus['customOptions']['dbaasVersion'] }}"
-    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] }}"
-    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
-    db_name: "{{ morpheus['customOptions']['dbName'] }}"
+    
+    # Default superuser values if no custom inputs
+    default_username: "root"
+    default_password: "root"
+    default_dbname: "mysql"
+    
+    # Use custom inputs if defined, otherwise use defaults
+    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] | default(default_username) }}"
+    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] | default(default_password) }}"
+    db_name: "{{ morpheus['customOptions']['dbName'] | default(default_dbname) }}"
+
+  pre_tasks:
+    - name: Verify database version is provided
+      fail:
+        msg: "Database version (dbaas_version) is required"
+      when: dbaas_version is not defined or dbaas_version | trim == ''
+ 
   tasks:
    - name: Install required packages
      apt:
@@ -23,8 +38,8 @@
    - name: Install MySQL Server
      apt:
        pkg:
-         - mysql-server
-         - mysql-client
+         - mysql-server={{ dbaas_version }}*
+         - mysql-client={{ dbaas_version }}*
        state: present
        update_cache: yes
  
@@ -44,7 +59,7 @@
      mysql_user:
        name: "{{ dbaas_username }}"
        password: "{{ dbaas_password }}"
-       priv: "{{ db_name }}.*:ALL"
+       priv: "{{ '*.*:ALL,GRANT' if dbaas_username == 'root' else db_name + '.*:ALL' }}"
        host: '%'
        state: present
        login_unix_socket: /var/run/mysqld/mysqld.sock
