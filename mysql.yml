@@ -6,28 +6,23 @@
  
   vars:
     # Required field
-    dbaas_version: "{{ morpheus['customOptions']['dbaasVersion'] }}"
+    dbaas_version: "<%=customOptions.dbaasVersion%>"
     
-    # Default superuser values if no custom inputs
+    # Default superuser values if no custom inputs provided
     default_username: "root"
     default_password: "root"
     default_dbname: "mysql"
     
     # Use custom inputs if defined, otherwise use defaults
-    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] | default(default_username) }}"
-    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] | default(default_password) }}"
-    db_name: "{{ morpheus['customOptions']['dbName'] | default(default_dbname) | regex_replace('[^a-zA-Z0-9_]', '_') }}"
+    dbaas_username: "<%=customOptions.dbaasUsername%>" | default(default_username)
+    dbaas_password: "<%=customOptions.dbaasPassword%>" | default(default_password)
+    db_name: "<%=customOptions.dbName%>" | default(default_dbname) | regex_replace('[^a-zA-Z0-9_]', '_')
 
   pre_tasks:
     - name: Verify database version is provided
       fail:
-        msg: "Database version (dbaas_version) is required"
-      when: dbaas_version is not defined or dbaas_version | trim == ''
-
-    - name: Verify database name is valid
-      fail:
-        msg: "Database name must not be empty"
-      when: db_name | trim == ''
+        msg: "Database version is required"
+      when: not dbaas_version or dbaas_version == ''
  
   tasks:
    - name: Install required packages
@@ -56,7 +51,7 @@
  
    - name: Create application database
      mysql_db:
-       name: "{{ db_name | quote }}"
+       name: "{{ db_name }}"
        state: present
        login_unix_socket: /var/run/mysqld/mysqld.sock
  
@@ -64,7 +59,7 @@
      mysql_user:
        name: "{{ dbaas_username }}"
        password: "{{ dbaas_password }}"
-       priv: "{{ ('*.*:ALL,GRANT' if dbaas_username == 'root' else db_name + '.*:ALL') | quote }}"
+       priv: "{{ '*.*:ALL,GRANT' if dbaas_username == default_username else db_name + '.*:ALL' }}"
        host: '%'
        state: present
        login_unix_socket: /var/run/mysqld/mysqld.sock
