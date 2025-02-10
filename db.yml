@@ -6,20 +6,54 @@
     dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] }}"
     dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
     db_name: "{{ morpheus['customOptions']['dbName'] }}"
-    mongodb_packages:
+    mongodb_packages_5_6:
       - mongodb-org
       - mongodb-org-server
       - mongodb-org-mongos
       - mongodb-org-shell
       - mongodb-org-tools
+    mongodb_packages_8:
+      - mongodb-org
+      - mongodb-org-server
+      - mongodb-org-mongos
+      - mongodb-database-tools
+      - mongodb-mongosh
+    mongod_config: |
+      storage:
+        dbPath: /var/lib/mongodb
+        journal:
+          enabled: true
+      systemLog:
+        destination: file
+        logAppend: true
+        path: /var/log/mongodb/mongod.log
+      net:
+        port: 27017
+        bindIp: 127.0.0.1
+      processManagement:
+        timeZoneInfo: /usr/share/zoneinfo
+      security:
+        authorization: enabled
 
   tasks:
+    - name: Set MongoDB packages based on version
+      set_fact:
+        mongodb_packages: "{{ mongodb_packages_5_6 if dbaas_version in ['5.0', '6.0'] else mongodb_packages_8 }}"
+
     - name: Check MongoDB version
       fail:
         msg: "Unsupported MongoDB version. Supported versions are 5.0, 6.0, and 8.0"
       when: dbaas_version not in ['5.0', '6.0', '8.0']
 
-    - name: Install SSL dependencies for Ubuntu
+    # Version-specific SSL handling for 5.0 and 6.0
+    - name: Add SSL repository for Ubuntu 20.04 (MongoDB 5.0 and 6.0)
+      apt_repository:
+        repo: deb http://security.ubuntu.com/ubuntu focal-security main
+        state: present
+        filename: focal-security
+      when: dbaas_version in ['5.0', '6.0']
+
+    - name: Install SSL dependencies for Ubuntu (MongoDB 5.0 and 6.0)
       apt:
         name:
           - ca-certificates
@@ -28,12 +62,14 @@
         allow_downgrade: yes
       when: dbaas_version in ['5.0', '6.0']
 
-    - name: Add SSL repository for Ubuntu 20.04
-      apt_repository:
-        repo: deb http://security.ubuntu.com/ubuntu focal-security main
+    # SSL handling for MongoDB 8.0
+    - name: Install OpenSSL for MongoDB 8.0
+      apt:
+        name:
+          - openssl
+          - ca-certificates
         state: present
-        filename: focal-security
-      when: dbaas_version in ['5.0', '6.0']
+      when: dbaas_version == '8.0'
 
     - name: Install system prerequisites
       apt:
@@ -60,9 +96,10 @@
 
     - name: Add MongoDB repository
       apt_repository:
-        repo: "deb [arch=amd64] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/{{ dbaas_version }} multiverse"
+        repo: "deb [arch=amd64] https://repo.mongodb.org/apt/ubuntu {{ ansible_distribution_release }}/mongodb-org/{{ dbaas_version }} multiverse"
         state: present
         filename: mongodb-org
+        update_cache: yes
 
     - name: Update package cache
       apt:
@@ -80,6 +117,16 @@
         purge: yes
       ignore_errors: yes
 
+    - name: Clean MongoDB directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/lib/mongodb
+        - /var/log/mongodb
+        - /etc/mongod.conf
+      ignore_errors: yes
+
     - name: Install MongoDB packages
       apt:
         name: "{{ mongodb_packages }}"
@@ -87,6 +134,26 @@
         allow_downgrades: yes
         allow_unauthenticated: yes
         dpkg_options: 'force-confnew,force-confdef'
+        update_cache: yes
+
+    - name: Create MongoDB directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: mongodb
+        group: mongodb
+        mode: '0755'
+      loop:
+        - /var/lib/mongodb
+        - /var/log/mongodb
+
+    - name: Create MongoDB configuration
+      copy:
+        content: "{{ mongod_config }}"
+        dest: /etc/mongod.conf
+        owner: mongodb
+        group: mongodb
+        mode: '0644'
 
     - name: Hold MongoDB packages
       shell: apt-mark hold {{ item }}
@@ -98,6 +165,7 @@
         name: mongod
         state: started
         enabled: yes
+        daemon_reload: yes
 
     - name: Wait for MongoDB to start
       wait_for:
@@ -105,7 +173,18 @@
         delay: 10
         timeout: 30
 
-    - name: Create MongoDB admin user
+    - name: Create MongoDB admin user (MongoDB 5.0 and 6.0)
+      shell: |
+        mongo admin --eval '
+        db.createUser({
+          user: "{{ dbaas_username }}",
+          pwd: "{{ dbaas_password }}",
+          roles: [ { role: "root", db: "admin" } ]
+        });'
+      ignore_errors: yes
+      when: dbaas_version in ['5.0', '6.0']
+
+    - name: Create MongoDB admin user (MongoDB 8.0)
       shell: |
         mongosh admin --eval '
         db.createUser({
@@ -114,12 +193,21 @@
           roles: [ { role: "root", db: "admin" } ]
         });'
       ignore_errors: yes
+      when: dbaas_version == '8.0'
 
-    - name: Create application database
+    - name: Create application database (MongoDB 5.0 and 6.0)
+      shell: |
+        mongo admin -u "{{ dbaas_username }}" -p "{{ dbaas_password }}" --eval '
+        db.getSiblingDB("{{ db_name }}").createCollection("init")'
+      ignore_errors: yes
+      when: dbaas_version in ['5.0', '6.0']
+
+    - name: Create application database (MongoDB 8.0)
       shell: |
         mongosh admin -u "{{ dbaas_username }}" -p "{{ dbaas_password }}" --eval '
         db.getSiblingDB("{{ db_name }}").createCollection("init")'
       ignore_errors: yes
+      when: dbaas_version == '8.0'
 
     - name: Update MongoDB configuration for remote access
       lineinfile:
