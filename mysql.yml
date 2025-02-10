@@ -29,6 +29,10 @@
         dbaas_username: "{{ default_username if not dbaas_username or dbaas_username == '' }}"
         dbaas_password: "{{ default_password if not dbaas_password or dbaas_password == '' }}"
         db_name: "{{ default_dbname if not db_name or db_name == '' }}"
+
+    - name: Set privileges based on user type
+      set_fact:
+        user_privileges: "{{ '*.*:ALL,GRANT' if dbaas_username == default_username else db_name + '.*:ALL' }}"
  
   tasks:
    - name: Install required packages
@@ -60,13 +64,13 @@
        name: "{{ db_name }}"
        state: present
        login_unix_socket: /var/run/mysqld/mysqld.sock
-     when: db_name != "mysql"  # Only create if not using default system database
+     when: db_name != "mysql"
  
    - name: Create database user
      mysql_user:
        name: "{{ dbaas_username }}"
        password: "{{ dbaas_password }}"
-       priv: "{{ '*.*:ALL,GRANT' if dbaas_username == default_username else db_name + '.*:ALL' }}"
+       priv: "{{ user_privileges }}"
        host: '%'
        state: present
        login_unix_socket: /var/run/mysqld/mysqld.sock
