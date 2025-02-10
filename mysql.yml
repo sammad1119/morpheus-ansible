@@ -14,15 +14,21 @@
     default_dbname: "mysql"
     
     # Use custom inputs if defined, otherwise use defaults
-    dbaas_username: "{{ '<%=customOptions.dbaasUsername%>' | default(default_username) }}"
-    dbaas_password: "{{ '<%=customOptions.dbaasPassword%>' | default(default_password) }}"
-    db_name: "{{ '<%=customOptions.dbName%>' | default(default_dbname) }}"
+    dbaas_username: "<%=customOptions.dbaasUsername%>"
+    dbaas_password: "<%=customOptions.dbaasPassword%>"
+    db_name: "<%=customOptions.dbName%>"
 
   pre_tasks:
     - name: Verify database version is provided
       fail:
         msg: "Database version is required"
       when: not dbaas_version or dbaas_version == ''
+
+    - name: Set default values if inputs are empty
+      set_fact:
+        dbaas_username: "{{ default_username if not dbaas_username or dbaas_username == '' }}"
+        dbaas_password: "{{ default_password if not dbaas_password or dbaas_password == '' }}"
+        db_name: "{{ default_dbname if not db_name or db_name == '' }}"
  
   tasks:
    - name: Install required packages
@@ -54,6 +60,7 @@
        name: "{{ db_name }}"
        state: present
        login_unix_socket: /var/run/mysqld/mysqld.sock
+     when: db_name != "mysql"  # Only create if not using default system database
  
    - name: Create database user
      mysql_user:
