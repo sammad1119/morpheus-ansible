@@ -92,6 +92,14 @@
        method: md5
        create: true
      notify: Restart PostgreSQL
+
+   - name: Configure PostgreSQL to listen on all addresses
+     lineinfile:
+       path: "/etc/postgresql/{{ db_version }}/main/postgresql.conf"
+       regexp: '^listen_addresses'
+       line: "listen_addresses = '*'"
+       state: present
+     notify: Restart PostgreSQL
  
   handlers:
    - name: Restart PostgreSQL
