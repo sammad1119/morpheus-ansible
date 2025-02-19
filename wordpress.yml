@@ -1,3 +1,23 @@
+- name: Debug database variables availability
+      debug:
+        msg: 
+          - "Morpheus variables available: {{ has_morpheus_vars | bool }}"
+          - "Using database host: {{ db_host }}"
+          - "Using database name: {{ db_name }}"
+          - "Using database username: {{ dbaas_username }}"
+  pre_tasks:
+    - name: Check if morpheus variable is defined
+      set_fact:
+        has_morpheus_vars: "{{ (morpheus is defined) | bool }}"
+      ignore_errors: yes
+
+    - name: Set database connection details manually if morpheus vars missing
+      set_fact:
+        dbaas_username: "wordpress_user"
+        dbaas_password: "wordpress_password"
+        db_name: "wordpress_db"
+        db_host: "localhost"
+      when: not has_morpheus_vars
 ---
 - name: Install WordPress and Connect to Database
   hosts: all
@@ -6,12 +26,19 @@
   vars:
     ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
   vars:
-    # Use the same variable names as in the database tier
-    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] }}"
-    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
-    db_name: "{{ morpheus['customOptions']['dbName'] }}"
-    # Reference to the database tier's IP address
-    db_host: "{{ morpheus.containers | selectattr('server.type', 'equalto', 'database') | map(attribute='server.internalIp') | first | default(morpheus['database']['host']) }}"
+    # Use the same variable names as in the database tier with defaults
+    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] | default('wordpress_user') }}"
+    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] | default('wordpress_password') }}"
+    db_name: "{{ morpheus['customOptions']['dbName'] | default('wordpress_db') }}"
+    # Reference to the database tier's IP address with fallbacks
+    db_host: "{{ 
+      morpheus.containers | 
+      default([]) | 
+      selectattr('server.type', 'equalto', 'database') | 
+      map(attribute='server.internalIp') | 
+      first | 
+      default(morpheus['database']['host'] | default('localhost')) 
+    }}"
     wordpress_version: "6.4.3"
 
   tasks:
