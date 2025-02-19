@@ -2,16 +2,27 @@
 - name: Install WordPress and Connect to Database
   hosts: all
   become: yes
+  gather_facts: no # Skip initial fact gathering that requires SSH
   vars:
-    # Database connection variables
-    db_user: "{{ morpheus['customOptions']['dbaasUsername'] }}"
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+  vars:
+    # Use the same variable names as in the database tier
+    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] }}"
+    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
     db_name: "{{ morpheus['customOptions']['dbName'] }}"
-    db_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
     # Reference to the database tier's IP address
     db_host: "{{ morpheus.containers | selectattr('server.type', 'equalto', 'database') | map(attribute='server.internalIp') | first | default(morpheus['database']['host']) }}"
     wordpress_version: "6.4.3"
 
   tasks:
+    - name: Wait for SSH connection
+      wait_for_connection:
+        delay: 10
+        timeout: 300
+
+    - name: Gather facts after connection established
+      setup:
+
     - name: Update apt cache
       apt:
         update_cache: yes
@@ -54,6 +65,14 @@
         owner: www-data
         group: www-data
 
+    - name: Ensure WordPress directory exists
+      file:
+        path: /var/www/html/wordpress
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0755'
+      
     - name: Create wp-config.php
       template:
         dest: /var/www/html/wordpress/wp-config.php
@@ -64,8 +83,8 @@
           <?php
           // ** Database settings ** //
           define('DB_NAME', '{{ db_name }}');
-          define('DB_USER', '{{ db_user }}');
-          define('DB_PASSWORD', '{{ db_password }}');
+          define('DB_USER', '{{ dbaas_username }}');
+          define('DB_PASSWORD', '{{ dbaas_password }}');
           define('DB_HOST', '{{ db_host }}');
           define('DB_CHARSET', 'utf8');
           define('DB_COLLATE', '');
@@ -142,12 +161,26 @@
         path: /tmp/wordpress.tar.gz
         state: absent
 
+    - name: Debug database connection variables
+      debug:
+        msg: 
+          - "Database Host: {{ db_host }}"
+          - "Database Name: {{ db_name }}"
+          - "Database Username: {{ dbaas_username }}"
+          - "Password defined: {{ dbaas_password|default('no')|bool }}"
+      
     - name: Wait for database connection
       wait_for:
         host: "{{ db_host }}"
         port: 3306
         timeout: 300
         delay: 10
+      register: db_connection_result
+      ignore_errors: yes
+      
+    - name: Display database connection status
+      debug:
+        msg: "Database connection {{ 'succeeded' if db_connection_result.failed is not defined else 'failed: ' + db_connection_result.msg }}"
 
   handlers:
     - name: restart apache
