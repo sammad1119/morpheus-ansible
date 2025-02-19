@@ -3,10 +3,10 @@
   hosts: all
   become: yes
   vars:
-    # Database variables from Morpheus custom options
-    db_user: "<%=customOptions.dbaasUsername%>"
-    db_name: "<%=customOptions.dbName%>"
-    db_password: "<%=customOptions.dbaasPassword%>"
+    # Database variables using Ansible/Morpheus syntax
+    db_user: "{{ morpheus['customOptions']['dbaasUsername'] }}"
+    db_name: "{{ morpheus['customOptions']['dbName'] }}"
+    db_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
     db_host: "{{ morpheus['database']['host'] }}"
     wordpress_version: "6.4.3"
 
