@@ -9,6 +9,7 @@
     dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] }}"
     dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
     db_name: "{{ morpheus['customOptions']['dbName'] }}"
+    
   tasks:
    - name: Install required packages
      apt:
@@ -55,6 +56,13 @@
        regexp: '^bind-address\s*=\s*127\.0\.0\.1'
        replace: 'bind-address = 0.0.0.0'
      notify: Restart MySQL
+
+   - name: Open MySQL port in firewall
+     ufw:
+       rule: allow
+       port: 3306
+       proto: tcp
+     ignore_errors: yes
  
   handlers:
    - name: Restart MySQL
