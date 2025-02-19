@@ -1,4 +1,17 @@
-pre_tasks:
+---
+- hosts: all
+  become: yes
+  become_method: sudo
+  become_user: root
+  gather_facts: no # Skip initial fact gathering that requires SSH
+  vars:
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+    dbaas_version: "{{ morpheus['customOptions']['dbaasVersion'] | default('8.0') }}"
+    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] | default('wordpress_user') }}"
+    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] | default('wordpress_password') }}"
+    db_name: "{{ morpheus['customOptions']['dbName'] | default('wordpress_db') }}"
+    
+  pre_tasks:
     - name: Check if morpheus variable is defined
       set_fact:
         has_morpheus_vars: "{{ (morpheus is defined) | bool }}"
@@ -17,21 +30,8 @@ pre_tasks:
         msg: 
           - "Morpheus variables available: {{ has_morpheus_vars | bool }}"
           - "Using database name: {{ db_name }}"
-          - "Using database username: {{ dbaas_username }}"---
-- hosts: all
-  become: yes
-  become_method: sudo
-  become_user: root
-  gather_facts: no # Skip initial fact gathering that requires SSH
-  vars:
-    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
- 
-  vars:
-    dbaas_version: "{{ morpheus['customOptions']['dbaasVersion'] | default('8.0') }}"
-    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] | default('wordpress_user') }}"
-    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] | default('wordpress_password') }}"
-    db_name: "{{ morpheus['customOptions']['dbName'] | default('wordpress_db') }}"
-    
+          - "Using database username: {{ dbaas_username }}"
+
   tasks:
    - name: Wait for SSH connection
      wait_for_connection:
