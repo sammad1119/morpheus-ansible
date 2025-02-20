@@ -1,46 +1,16 @@
+
 ---
 - hosts: all
   become: yes
   become_method: sudo
   become_user: root
-  gather_facts: no # Skip initial fact gathering that requires SSH
+ 
   vars:
-    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
-    dbaas_version: "{{ morpheus['customOptions']['dbaasVersion'] | default('8.0') }}"
-    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] | default('wordpress_user') }}"
-    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] | default('wordpress_password') }}"
-    db_name: "{{ morpheus['customOptions']['dbName'] | default('wordpress_db') }}"
-    
-  pre_tasks:
-    - name: Check if morpheus variable is defined
-      set_fact:
-        has_morpheus_vars: "{{ (morpheus is defined) | bool }}"
-      ignore_errors: yes
-
-    - name: Set database details manually if morpheus vars missing
-      set_fact:
-        dbaas_username: "wordpress_user"
-        dbaas_password: "wordpress_password"
-        db_name: "wordpress_db"
-        dbaas_version: "8.0"
-      when: not has_morpheus_vars
-      
-    - name: Debug database variables availability
-      debug:
-        msg: 
-          - "Morpheus variables available: {{ has_morpheus_vars | bool }}"
-          - "Using database name: {{ db_name }}"
-          - "Using database username: {{ dbaas_username }}"
-
+    dbaas_version: "{{ morpheus['customOptions']['dbaasVersion'] }}"
+    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] }}"
+    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
+    db_name: "{{ morpheus['customOptions']['dbName'] }}"
   tasks:
-   - name: Wait for SSH connection
-     wait_for_connection:
-       delay: 10
-       timeout: 300
-
-   - name: Gather facts after connection established
-     setup:
-
    - name: Install required packages
      apt:
        name:
@@ -86,13 +56,6 @@
        regexp: '^bind-address\s*=\s*127\.0\.0\.1'
        replace: 'bind-address = 0.0.0.0'
      notify: Restart MySQL
-
-   - name: Open MySQL port in firewall
-     ufw:
-       rule: allow
-       port: 3306
-       proto: tcp
-     ignore_errors: yes
  
   handlers:
    - name: Restart MySQL
