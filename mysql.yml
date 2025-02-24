@@ -9,6 +9,7 @@
     dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] }}"
     dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
     db_name: "{{ morpheus['customOptions']['dbName'] }}"
+ 
   tasks:
    - name: Install required packages
      apt:
@@ -17,10 +18,11 @@
          - acl
          - python3-pip
          - python3-mysqldb
+         - ufw
        state: present
        update_cache: yes
  
-   - name: Install MySQL Server
+   - name: Install MySQL Server and Client
      apt:
        pkg:
          - mysql-server
@@ -34,6 +36,12 @@
        state: started
        enabled: yes
  
+   - name: Allow MySQL port in UFW
+     ufw:
+       rule: allow
+       port: '3306'
+       proto: tcp
+ 
    - name: Create application database
      mysql_db:
        name: "{{ db_name }}"
@@ -44,17 +52,37 @@
      mysql_user:
        name: "{{ dbaas_username }}"
        password: "{{ dbaas_password }}"
-       priv: "{{ db_name }}.*:ALL"
+       priv: '*.*:ALL,GRANT'
        host: '%'
        state: present
        login_unix_socket: /var/run/mysqld/mysqld.sock
  
-   - name: Allow remote connections
+   - name: Allow remote connections - bind address
      replace:
        path: /etc/mysql/mysql.conf.d/mysqld.cnf
        regexp: '^bind-address\s*=\s*127\.0\.0\.1'
        replace: 'bind-address = 0.0.0.0'
      notify: Restart MySQL
+ 
+   - name: Ensure MySQL port is set
+     lineinfile:
+       path: /etc/mysql/mysql.conf.d/mysqld.cnf
+       regexp: '^port\s*='
+       line: 'port = 3306'
+       insertafter: '[mysqld]'
+     notify: Restart MySQL
+ 
+   - name: Update MySQL configuration for remote access
+     blockinfile:
+       path: /etc/mysql/mysql.conf.d/mysqld.cnf
+       block: |
+         skip-external-locking
+         skip-name-resolve
+       insertafter: '[mysqld]'
+     notify: Restart MySQL
+ 
+   - name: Flush MySQL privileges
+     command: mysql -e "FLUSH PRIVILEGES;"
  
   handlers:
    - name: Restart MySQL
