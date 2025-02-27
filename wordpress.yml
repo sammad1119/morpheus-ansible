@@ -3,6 +3,7 @@
   become: yes
   become_method: sudo
   become_user: root
+  
   vars:
     # WordPress settings - customize these
     domain: example.com
