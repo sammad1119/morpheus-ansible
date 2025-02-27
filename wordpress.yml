@@ -1,217 +1,176 @@
 ---
-- name: Install WordPress and Connect to Database
-  hosts: all
+- hosts: all
   become: yes
-  gather_facts: no # Skip initial fact gathering that requires SSH
   vars:
-    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
-    # Use the same variable names as in the database tier with defaults
-    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] | default('wordpress_user') }}"
-    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] | default('wordpress_password') }}"
-    db_name: "{{ morpheus['customOptions']['dbName'] | default('wordpress_db') }}"
-    # Reference to the database tier's IP address with fallbacks
-    db_host: "{{ 
-      morpheus.containers | 
-      default([]) | 
-      selectattr('server.type', 'equalto', 'database') | 
-      map(attribute='server.internalIp') | 
-      first | 
-      default(morpheus['database']['host'] | default('localhost')) 
-    }}"
-    wordpress_version: "6.4.3"
+    # WordPress settings - customize these
+    domain: example.com
+    wp_user: admin
+    wp_password: StrongPassword123
+    wp_email: admin@example.com
+    wp_title: "My WordPress Site"
     
-  pre_tasks:
-    - name: Check if morpheus variable is defined
-      set_fact:
-        has_morpheus_vars: "{{ (morpheus is defined) | bool }}"
-      ignore_errors: yes
-
-    - name: Set database connection details manually if morpheus vars missing
-      set_fact:
-        dbaas_username: "wordpress_user"
-        dbaas_password: "wordpress_password"
-        db_name: "wordpress_db"
-        db_host: "localhost"
-      when: not has_morpheus_vars
-      
-    - name: Debug database variables availability
-      debug:
-        msg: 
-          - "Morpheus variables available: {{ has_morpheus_vars | bool }}"
-          - "Using database host: {{ db_host }}"
-          - "Using database name: {{ db_name }}"
-          - "Using database username: {{ dbaas_username }}"
+    # Database settings - customize these
+    db_name: wordpress
+    db_user: wpuser
+    db_password: DBPassword123
 
   tasks:
-    - name: Wait for SSH connection
-      wait_for_connection:
-        delay: 10
-        timeout: 300
-
-    - name: Gather facts after connection established
-      setup:
-
     - name: Update apt cache
       apt:
         update_cache: yes
-
+    
     - name: Install required packages
       apt:
         name:
           - apache2
+          - mysql-server
           - php
           - php-mysql
           - php-curl
           - php-gd
           - php-mbstring
           - php-xml
-          - php-zip
+          - php-xmlrpc
           - libapache2-mod-php
+          - python3-pymysql
+          - unzip
         state: present
-
-    - name: Start and enable Apache
-      service:
-        name: apache2
-        state: started
-        enabled: yes
-
-    - name: Debug database connection variables
-      debug:
-        msg: 
-          - "Database Host: {{ db_host }}"
-          - "Database Name: {{ db_name }}"
-          - "Database Username: {{ dbaas_username }}"
-          - "Password defined: {{ dbaas_password|default('no')|bool }}"
-      
-    - name: Wait for database connection
-      wait_for:
-        host: "{{ db_host }}"
-        port: 3306
-        timeout: 300
-        delay: 10
-      register: db_connection_result
-      ignore_errors: yes
-      
-    - name: Display database connection status
-      debug:
-        msg: "Database connection {{ 'succeeded' if db_connection_result.failed is not defined else 'failed: ' + db_connection_result.msg }}"
-
+    
+    - name: Enable Apache modules
+      command: a2enmod rewrite
+      notify: Restart Apache
+    
+    - name: Create MySQL database
+      mysql_db:
+        name: "{{ db_name }}"
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+    
+    - name: Create MySQL user
+      mysql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        priv: "{{ db_name }}.*:ALL"
+        host: localhost
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+    
     - name: Download WordPress
       get_url:
-        url: "https://wordpress.org/wordpress-{{ wordpress_version }}.tar.gz"
+        url: https://wordpress.org/latest.tar.gz
         dest: /tmp/wordpress.tar.gz
-
-    - name: Remove default index.html if it exists
-      file:
-        path: /var/www/html/index.html
-        state: absent
-
-    - name: Extract WordPress to web root
+    
+    - name: Extract WordPress
       unarchive:
         src: /tmp/wordpress.tar.gz
-        dest: /var/www/html/
+        dest: /var/www/
         remote_src: yes
-        owner: www-data
-        group: www-data
-
-    - name: Ensure WordPress directory exists
-      file:
-        path: /var/www/html/wordpress
-        state: directory
-        owner: www-data
-        group: www-data
-        mode: '0755'
-      
+    
+    - name: Copy WordPress files to web root
+      command: cp -a /var/www/wordpress/. /var/www/html/
+      args:
+        creates: /var/www/html/wp-config-sample.php
+    
+    # Generate secure keys for WordPress
+    - name: Generate WordPress Security Keys
+      set_fact:
+        auth_key: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
+        secure_auth_key: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
+        logged_in_key: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
+        nonce_key: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
+        auth_salt: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
+        secure_auth_salt: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
+        logged_in_salt: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
+        nonce_salt: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
+    
     - name: Create wp-config.php
-      template:
-        dest: /var/www/html/wordpress/wp-config.php
+      copy:
+        dest: /var/www/html/wp-config.php
         owner: www-data
         group: www-data
-        mode: '0644'
         content: |
           <?php
-          // ** Database settings ** //
+          /**
+           * Basic WordPress config file
+           */
+          
+          // Database settings
           define('DB_NAME', '{{ db_name }}');
-          define('DB_USER', '{{ dbaas_username }}');
-          define('DB_PASSWORD', '{{ dbaas_password }}');
-          define('DB_HOST', '{{ db_host }}');
+          define('DB_USER', '{{ db_user }}');
+          define('DB_PASSWORD', '{{ db_password }}');
+          define('DB_HOST', 'localhost');
           define('DB_CHARSET', 'utf8');
           define('DB_COLLATE', '');
-
-          {{ lookup('url', 'https://api.wordpress.org/secret-key/1.1/salt/') }}
-
+          
+          // Authentication keys and salts
+          define('AUTH_KEY',         '{{ auth_key }}');
+          define('SECURE_AUTH_KEY',  '{{ secure_auth_key }}');
+          define('LOGGED_IN_KEY',    '{{ logged_in_key }}');
+          define('NONCE_KEY',        '{{ nonce_key }}');
+          define('AUTH_SALT',        '{{ auth_salt }}');
+          define('SECURE_AUTH_SALT', '{{ secure_auth_salt }}');
+          define('LOGGED_IN_SALT',   '{{ logged_in_salt }}');
+          define('NONCE_SALT',       '{{ nonce_salt }}');
+          
+          // Table prefix
           $table_prefix = 'wp_';
           
+          // Debug mode
           define('WP_DEBUG', false);
           
-          // Absolute path to the WordPress directory
+          /* That's all, stop editing! */
+          
           if (!defined('ABSPATH')) {
-              define('ABSPATH', dirname(__FILE__) . '/');
+              define('ABSPATH', __DIR__ . '/');
           }
           
-          /** Sets up WordPress vars and included files. */
-          require_once(ABSPATH . 'wp-settings.php');
-
-    - name: Ensure correct permissions for WordPress files
+          require_once ABSPATH . 'wp-settings.php';
+    
+    - name: Set proper permissions
       file:
-        path: /var/www/html/wordpress
+        path: /var/www/html
         owner: www-data
         group: www-data
         recurse: yes
-        mode: '0755'
-
-    - name: Create .htaccess file
-      copy:
-        dest: /var/www/html/wordpress/.htaccess
-        owner: www-data
-        group: www-data
-        mode: '0644'
-        content: |
-          # BEGIN WordPress
-          <IfModule mod_rewrite.c>
-          RewriteEngine On
-          RewriteBase /
-          RewriteRule ^index\.php$ - [L]
-          RewriteCond %{REQUEST_FILENAME} !-f
-          RewriteCond %{REQUEST_FILENAME} !-d
-          RewriteRule . /index.php [L]
-          </IfModule>
-          # END WordPress
-
-    - name: Configure Apache for WordPress
+        
+    - name: Set up Apache VirtualHost
       copy:
         dest: /etc/apache2/sites-available/wordpress.conf
         content: |
           <VirtualHost *:80>
-            DocumentRoot /var/www/html/wordpress
-            <Directory /var/www/html/wordpress>
-              AllowOverride All
-              Require all granted
-            </Directory>
-            ErrorLog ${APACHE_LOG_DIR}/error.log
-            CustomLog ${APACHE_LOG_DIR}/access.log combined
+              ServerAdmin webmaster@{{ domain }}
+              ServerName {{ domain }}
+              ServerAlias www.{{ domain }}
+              DocumentRoot /var/www/html
+              
+              <Directory /var/www/html/>
+                  Options FollowSymLinks
+                  AllowOverride All
+                  Require all granted
+              </Directory>
+              
+              ErrorLog ${APACHE_LOG_DIR}/error.log
+              CustomLog ${APACHE_LOG_DIR}/access.log combined
           </VirtualHost>
-
-    - name: Enable Apache rewrite module
-      apache2_module:
-        name: rewrite
-        state: present
-
-    - name: Enable WordPress site configuration
+      notify: Restart Apache
+        
+    - name: Enable WordPress site
       command: a2ensite wordpress
-      notify: restart apache
-
+      notify: Restart Apache
+        
     - name: Disable default Apache site
       command: a2dissite 000-default
-      notify: restart apache
-
-    - name: Clean up installation files
-      file:
-        path: /tmp/wordpress.tar.gz
-        state: absent
-
+      notify: Restart Apache
+    
+    # Install WP-CLI for command-line management (optional)
+    - name: Download WP-CLI
+      get_url:
+        url: https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+        dest: /usr/local/bin/wp
+        mode: '0755'
+  
   handlers:
-    - name: restart apache
+    - name: Restart Apache
       service:
         name: apache2
         state: restarted
