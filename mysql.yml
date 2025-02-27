@@ -5,10 +5,10 @@
   become_user: root
  
   vars:
-    dbaas_version: "{{ morpheus['customOptions']['dbaasVersion'] }}"
-    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] }}"
-    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
-    db_name: "{{ morpheus['customOptions']['dbName'] }}"
+    # Hardcoded database values
+    db_name: "wordpress_db"
+    db_user: "wordpress_user"
+    db_password: "StrongPassword123!"
  
   tasks:
    - name: Install required packages
@@ -50,8 +50,8 @@
  
    - name: Create database user
      mysql_user:
-       name: "{{ dbaas_username }}"
-       password: "{{ dbaas_password }}"
+       name: "{{ db_user }}"
+       password: "{{ db_password }}"
        priv: "{{ db_name }}.*:ALL,GRANT"
        host: '%'
        state: present
@@ -84,9 +84,30 @@
    - name: Flush MySQL privileges
      command: mysql -e "FLUSH PRIVILEGES;"
      
+   - name: Get server IP address
+     shell: hostname -I | awk '{print $1}'
+     register: server_ip
+     
+   - name: Create connection info file
+     copy:
+       dest: /opt/mysql_connection.json
+       content: |
+         {
+           "mysql_host": "{{ server_ip.stdout }}",
+           "mysql_database": "{{ db_name }}",
+           "mysql_user": "{{ db_user }}",
+           "mysql_password": "{{ db_password }}"
+         }
+       mode: '0644'
+     
    - name: Print connection information
      debug:
-       msg: "MySQL setup complete. Database name: {{ db_name }}, Username: {{ dbaas_username }}, Password: {{ dbaas_password }}"
+       msg: 
+         - "MySQL setup complete."
+         - "Database name: {{ db_name }}"
+         - "Username: {{ db_user }}"
+         - "Password: {{ db_password }}"
+         - "MySQL Server IP: {{ server_ip.stdout }}"
  
   handlers:
    - name: Restart MySQL
