@@ -52,7 +52,7 @@
      mysql_user:
        name: "{{ dbaas_username }}"
        password: "{{ dbaas_password }}"
-       priv: '*.*:ALL,GRANT'
+       priv: "{{ db_name }}.*:ALL,GRANT"
        host: '%'
        state: present
        login_unix_socket: /var/run/mysqld/mysqld.sock
@@ -83,6 +83,10 @@
  
    - name: Flush MySQL privileges
      command: mysql -e "FLUSH PRIVILEGES;"
+     
+   - name: Print connection information
+     debug:
+       msg: "MySQL setup complete. Database name: {{ db_name }}, Username: {{ dbaas_username }}, Password: {{ dbaas_password }}"
  
   handlers:
    - name: Restart MySQL
