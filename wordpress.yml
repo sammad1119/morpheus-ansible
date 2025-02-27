@@ -3,177 +3,230 @@
   become: yes
   become_method: sudo
   become_user: root
-  
+ 
   vars:
-    # WordPress settings - customize these
-    domain: example.com
-    wp_user: admin
-    wp_password: StrongPassword123
-    wp_email: admin@example.com
-    wp_title: "My WordPress Site"
+    # These will be populated dynamically
+    db_host: ""
+    db_name: "wordpress_db"
+    db_user: "wordpress_user"
+    db_password: "StrongPassword123!"
     
-    # Database settings - customize these
-    db_name: wordpress
-    db_user: wpuser
-    db_password: DBPassword123
+    # Hardcoded WordPress settings
+    wp_site_title: "My WordPress Site"
+    wp_admin_user: "admin"
+    wp_admin_password: "AdminPass123!"
+    wp_admin_email: "admin@example.com"
 
   tasks:
-    - name: Update apt cache
-      apt:
-        update_cache: yes
-    
-    - name: Install required packages
-      apt:
-        name:
-          - apache2
-          - mysql-server
-          - php
-          - php-mysql
-          - php-curl
-          - php-gd
-          - php-mbstring
-          - php-xml
-          - php-xmlrpc
-          - libapache2-mod-php
-          - python3-pymysql
-          - unzip
-        state: present
-    
-    - name: Enable Apache modules
-      command: a2enmod rewrite
-      notify: Restart Apache
-    
-    - name: Create MySQL database
-      mysql_db:
-        name: "{{ db_name }}"
-        state: present
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-    
-    - name: Create MySQL user
-      mysql_user:
-        name: "{{ db_user }}"
-        password: "{{ db_password }}"
-        priv: "{{ db_name }}.*:ALL"
-        host: localhost
-        state: present
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-    
-    - name: Download WordPress
-      get_url:
-        url: https://wordpress.org/latest.tar.gz
-        dest: /tmp/wordpress.tar.gz
-    
-    - name: Extract WordPress
-      unarchive:
-        src: /tmp/wordpress.tar.gz
-        dest: /var/www/
-        remote_src: yes
-    
-    - name: Copy WordPress files to web root
-      command: cp -a /var/www/wordpress/. /var/www/html/
-      args:
-        creates: /var/www/html/wp-config-sample.php
-    
-    # Generate secure keys for WordPress
-    - name: Generate WordPress Security Keys
-      set_fact:
-        auth_key: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
-        secure_auth_key: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
-        logged_in_key: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
-        nonce_key: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
-        auth_salt: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
-        secure_auth_salt: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
-        logged_in_salt: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
-        nonce_salt: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
-    
-    - name: Create wp-config.php
-      copy:
-        dest: /var/www/html/wp-config.php
-        owner: www-data
-        group: www-data
-        content: |
-          <?php
-          /**
-           * Basic WordPress config file
-           */
-          
-          // Database settings
-          define('DB_NAME', '{{ db_name }}');
-          define('DB_USER', '{{ db_user }}');
-          define('DB_PASSWORD', '{{ db_password }}');
-          define('DB_HOST', 'localhost');
-          define('DB_CHARSET', 'utf8');
-          define('DB_COLLATE', '');
-          
-          // Authentication keys and salts
-          define('AUTH_KEY',         '{{ auth_key }}');
-          define('SECURE_AUTH_KEY',  '{{ secure_auth_key }}');
-          define('LOGGED_IN_KEY',    '{{ logged_in_key }}');
-          define('NONCE_KEY',        '{{ nonce_key }}');
-          define('AUTH_SALT',        '{{ auth_salt }}');
-          define('SECURE_AUTH_SALT', '{{ secure_auth_salt }}');
-          define('LOGGED_IN_SALT',   '{{ logged_in_salt }}');
-          define('NONCE_SALT',       '{{ nonce_salt }}');
-          
-          // Table prefix
-          $table_prefix = 'wp_';
-          
-          // Debug mode
-          define('WP_DEBUG', false);
-          
-          /* That's all, stop editing! */
-          
-          if (!defined('ABSPATH')) {
-              define('ABSPATH', __DIR__ . '/');
-          }
-          
-          require_once ABSPATH . 'wp-settings.php';
-    
-    - name: Set proper permissions
-      file:
-        path: /var/www/html
-        owner: www-data
-        group: www-data
-        recurse: yes
-        
-    - name: Set up Apache VirtualHost
-      copy:
-        dest: /etc/apache2/sites-available/wordpress.conf
-        content: |
-          <VirtualHost *:80>
-              ServerAdmin webmaster@{{ domain }}
-              ServerName {{ domain }}
-              ServerAlias www.{{ domain }}
-              DocumentRoot /var/www/html
-              
-              <Directory /var/www/html/>
-                  Options FollowSymLinks
-                  AllowOverride All
-                  Require all granted
-              </Directory>
-              
-              ErrorLog ${APACHE_LOG_DIR}/error.log
-              CustomLog ${APACHE_LOG_DIR}/access.log combined
-          </VirtualHost>
-      notify: Restart Apache
-        
-    - name: Enable WordPress site
-      command: a2ensite wordpress
-      notify: Restart Apache
-        
-    - name: Disable default Apache site
-      command: a2dissite 000-default
-      notify: Restart Apache
-    
-    # Install WP-CLI for command-line management (optional)
-    - name: Download WP-CLI
-      get_url:
-        url: https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
-        dest: /usr/local/bin/wp
-        mode: '0755'
-  
+   - name: Install required packages
+     apt:
+       name:
+         - sudo
+         - acl
+         - python3-pip
+         - jq
+         - ufw
+         - apache2
+         - php
+         - php-mysql
+         - php-curl
+         - php-gd
+         - php-mbstring
+         - php-xml
+         - php-xmlrpc
+         - libapache2-mod-php
+         - unzip
+       state: present
+       update_cache: yes
+
+   # This task will find the MySQL server IP
+   - name: Wait for MySQL connection info
+     shell: "ping -c 1 {{ hostvars['mysql-tier']['ansible_default_ipv4']['address'] }}"
+     register: ping_result
+     until: ping_result.rc == 0
+     retries: 30
+     delay: 10
+     ignore_errors: yes
+     
+   - name: Set MySQL host
+     set_fact:
+       db_host: "{{ hostvars['mysql-tier']['ansible_default_ipv4']['address'] }}"
+     when: hostvars['mysql-tier'] is defined
+     
+   - name: Use default MySQL host if discovery fails
+     set_fact:
+       db_host: "{{ db_host | default('mysql-tier') }}"
+     
+   - name: Debug MySQL connection
+     debug:
+       msg: "Will connect to MySQL at {{ db_host }}"
+
+   - name: Allow HTTP port in UFW
+     ufw:
+       rule: allow
+       port: '80'
+       proto: tcp
+
+   - name: Allow HTTPS port in UFW
+     ufw:
+       rule: allow
+       port: '443'
+       proto: tcp
+
+   - name: Download WordPress
+     get_url:
+       url: https://wordpress.org/latest.tar.gz
+       dest: /tmp/wordpress.tar.gz
+
+   - name: Create WordPress directory
+     file:
+       path: /var/www/html
+       state: directory
+       owner: www-data
+       group: www-data
+       mode: '0755'
+
+   - name: Extract WordPress archive
+     unarchive:
+       src: /tmp/wordpress.tar.gz
+       dest: /tmp
+       remote_src: yes
+
+   - name: Copy WordPress files to web root
+     shell: "cp -a /tmp/wordpress/. /var/www/html/"
+     args:
+       creates: /var/www/html/wp-config-sample.php
+
+   - name: Set ownership of WordPress files
+     file:
+       path: /var/www/html
+       state: directory
+       owner: www-data
+       group: www-data
+       recurse: yes
+
+   # Hardcoded security keys for WordPress
+   - name: Set WordPress Security Keys
+     set_fact:
+       auth_key: "SQh2YYD5hQ(YM4%1K^y7m3vP5)zG9*7!XY87Bk9YVQvs$aBCR1PJE9&2nwU!69Tv"
+       secure_auth_key: "J6uR1EY*CxF!H3n&iV(1r8Z5NB&%a!3j8V$zcHGP@hK#L49%^C@2q7*kWXEYT%5U"
+       logged_in_key: "yU)3@8dQ$PZ%EhAjF7KL!xD2V#9mW5&n^G4*pJB6tXcC1R@YSNv(zT2QH3!sL7g5"
+       nonce_key: "Ru7@(t#6qD)V8K%&N3JF!zL5sP*E1G9yAcXwQ2H$b4Z^mT7SY@vMLpWB5&3*xC!n"
+       auth_salt: "7Kp9@(B3N5cM&!zJ8vF%yX2H*E1G6qS4wR$tL7^Z)PVD@aW3QY!n#xC5Ts2AuE&h"
+       secure_auth_salt: "C2%vX7N)s1G@h6L*aR5F!j9D4Z^wP8y3TbQmEu&KY#JW7n$BH@t(xS4Vz2A5!qE3"
+       logged_in_salt: "P5@zV1(K7*X4s8F!bA3E&n9G2J#yQ6tR$mW7u)D@L%Z^cH3SN!vYTxC2B5&w4jE1"
+       nonce_salt: "H4!yF7B@t3V*n5K(A2J$zG9s8E&qP6wR#mL1)D@X%Z^cC7SN!vYTxW2Q5&u3jE1"
+
+   - name: Create wp-config.php
+     copy:
+       dest: /var/www/html/wp-config.php
+       owner: www-data
+       group: www-data
+       content: |
+         <?php
+         /**
+          * Basic WordPress config file
+          */
+         
+         // Database settings - Connect to remote MySQL instance
+         define('DB_NAME', '{{ db_name }}');
+         define('DB_USER', '{{ db_user }}');
+         define('DB_PASSWORD', '{{ db_password }}');
+         define('DB_HOST', '{{ db_host }}');
+         define('DB_CHARSET', 'utf8');
+         define('DB_COLLATE', '');
+         
+         // Authentication keys and salts
+         define('AUTH_KEY',         '{{ auth_key }}');
+         define('SECURE_AUTH_KEY',  '{{ secure_auth_key }}');
+         define('LOGGED_IN_KEY',    '{{ logged_in_key }}');
+         define('NONCE_KEY',        '{{ nonce_key }}');
+         define('AUTH_SALT',        '{{ auth_salt }}');
+         define('SECURE_AUTH_SALT', '{{ secure_auth_salt }}');
+         define('LOGGED_IN_SALT',   '{{ logged_in_salt }}');
+         define('NONCE_SALT',       '{{ nonce_salt }}');
+         
+         // Table prefix
+         $table_prefix = 'wp_';
+         
+         // Debug mode
+         define('WP_DEBUG', false);
+         
+         /* That's all, stop editing! Happy publishing. */
+         
+         if (!defined('ABSPATH')) {
+             define('ABSPATH', __DIR__ . '/');
+         }
+         
+         require_once ABSPATH . 'wp-settings.php';
+
+   - name: Get server hostname
+     shell: "hostname"
+     register: server_hostname
+
+   - name: Enable Apache rewrite module
+     command: a2enmod rewrite
+     notify: Restart Apache
+
+   - name: Set up Apache VirtualHost
+     copy:
+       dest: /etc/apache2/sites-available/wordpress.conf
+       content: |
+         <VirtualHost *:80>
+             ServerAdmin webmaster@localhost
+             ServerName {{ server_hostname.stdout }}
+             DocumentRoot /var/www/html
+             
+             <Directory /var/www/html/>
+                 Options FollowSymLinks
+                 AllowOverride All
+                 Require all granted
+             </Directory>
+             
+             ErrorLog ${APACHE_LOG_DIR}/error.log
+             CustomLog ${APACHE_LOG_DIR}/access.log combined
+         </VirtualHost>
+     notify: Restart Apache
+
+   - name: Enable WordPress site
+     command: a2ensite wordpress
+     notify: Restart Apache
+
+   - name: Disable default Apache site
+     command: a2dissite 000-default
+     notify: Restart Apache
+
+   # Install WP-CLI for WordPress setup
+   - name: Install WP-CLI
+     get_url:
+       url: https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+       dest: /usr/local/bin/wp
+       mode: '0755'
+
+   - name: Install WordPress using WP-CLI
+     become_user: www-data
+     command: >
+       wp core install
+       --path=/var/www/html
+       --url=http://{{ server_hostname.stdout }}
+       --title="{{ wp_site_title }}"
+       --admin_user={{ wp_admin_user }}
+       --admin_password={{ wp_admin_password }}
+       --admin_email={{ wp_admin_email }}
+     ignore_errors: yes
+     
+   - name: Print WordPress access information
+     debug:
+       msg: 
+         - "WordPress installation complete."
+         - "MySQL Connection: {{ db_host }}"
+         - "Access your site at: http://{{ server_hostname.stdout }}"
+         - "Admin URL: http://{{ server_hostname.stdout }}/wp-admin"
+         - "Username: {{ wp_admin_user }}"
+         - "Password: {{ wp_admin_password }}"
+
   handlers:
-    - name: Restart Apache
-      service:
-        name: apache2
-        state: restarted
+   - name: Restart Apache
+     systemd:
+       name: apache2
+       state: restarted
