@@ -41,7 +41,7 @@
 
    # This task will find the MySQL server IP
    - name: Wait for MySQL connection info
-     shell: "ping -c 1 {{ hostvars['mysql-tier']['ansible_default_ipv4']['address'] }}"
+     shell: "ping -c 1 {{ hostvars['mysql-tier2']['ansible_default_ipv4']['address'] }}"
      register: ping_result
      until: ping_result.rc == 0
      retries: 30
@@ -50,12 +50,12 @@
      
    - name: Set MySQL host
      set_fact:
-       db_host: "{{ hostvars['mysql-tier']['ansible_default_ipv4']['address'] }}"
-     when: hostvars['mysql-tier'] is defined
+       db_host: "{{ hostvars['mysql-tier2']['ansible_default_ipv4']['address'] }}"
+     when: hostvars['mysql-tier2'] is defined
      
    - name: Use default MySQL host if discovery fails
      set_fact:
-       db_host: "{{ db_host | default('mysql-tier') }}"
+       db_host: "{{ db_host | default('mysql-tier2') }}"
      
    - name: Debug MySQL connection
      debug:
