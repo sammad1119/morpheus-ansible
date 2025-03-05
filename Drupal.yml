@@ -1,0 +1,194 @@
+---
+- hosts: all
+  become: yes
+  become_method: sudo
+  become_user: root
+  
+  vars:
+    # Drupal settings - customize these
+    domain: example.com
+    drupal_admin_user: admin
+    drupal_admin_password: StrongPassword123
+    drupal_admin_email: admin@example.com
+    drupal_site_name: "My Drupal Site"
+    
+    # Database settings - customize these
+    db_name: drupal
+    db_user: drupaluser
+    db_password: DBPassword123
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+    
+    - name: Install required packages
+      apt:
+        name:
+          - apache2
+          - mysql-server
+          - php
+          - php-mysql
+          - php-curl
+          - php-gd
+          - php-mbstring
+          - php-xml
+          - php-json
+          - php-opcache
+          - php-cli
+          - libapache2-mod-php
+          - python3-pymysql
+          - unzip
+          - php-dom
+          - php-simplexml
+          - git
+          - drush
+          - composer
+        state: present
+    
+    - name: Enable Apache modules
+      command: a2enmod rewrite
+      notify: Restart Apache
+      
+    - name: Configure MySQL to allow remote connections
+      lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^bind-address'
+        line: 'bind-address = 0.0.0.0'
+      notify: Restart MySQL
+    
+    - name: Create MySQL database
+      mysql_db:
+        name: "{{ db_name }}"
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+    
+    - name: Create MySQL user with local access
+      mysql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        priv: "{{ db_name }}.*:ALL"
+        host: localhost
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        
+    - name: Create MySQL user with remote access
+      mysql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        priv: "{{ db_name }}.*:ALL"
+        host: '%'
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+    
+    - name: Download Drupal using Composer
+      command: >
+        composer create-project drupal/recommended-project /var/www/drupal
+      args:
+        creates: /var/www/drupal/web/index.php
+    
+    - name: Create Drupal files directory
+      file:
+        path: /var/www/drupal/web/sites/default/files
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0755'
+    
+    - name: Copy default settings file
+      copy:
+        src: /var/www/drupal/web/sites/default/default.settings.php
+        dest: /var/www/drupal/web/sites/default/settings.php
+        remote_src: yes
+        owner: www-data
+        group: www-data
+        mode: '0644'
+    
+    - name: Update Drupal settings file
+      lineinfile:
+        path: /var/www/drupal/web/sites/default/settings.php
+        line: "$databases['default']['default'] = array(\n  'driver' => 'mysql',\n  'database' => '{{ db_name }}',\n  'username' => '{{ db_user }}',\n  'password' => '{{ db_password }}',\n  'host' => 'localhost',\n  'port' => '',\n  'prefix' => '',\n  'collation' => 'utf8mb4_general_ci',\n);"
+        insertafter: "^# .* comment indicating that the $databases array has been moved"
+    
+    - name: Generate hash salt for Drupal
+      set_fact:
+        drupal_hash_salt: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
+    
+    - name: Add hash salt to settings file
+      lineinfile:
+        path: /var/www/drupal/web/sites/default/settings.php
+        line: "$settings['hash_salt'] = '{{ drupal_hash_salt }}';"
+        insertafter: "^# .* comment indicating that the $settings array has been moved"
+    
+    - name: Set file system path in settings
+      lineinfile:
+        path: /var/www/drupal/web/sites/default/settings.php
+        line: "$settings['file_public_path'] = 'sites/default/files';"
+        insertafter: "^#.*file_public_path"
+    
+    - name: Set proper permissions
+      file:
+        path: /var/www/drupal
+        owner: www-data
+        group: www-data
+        recurse: yes
+    
+    - name: Create symbolic link to Drupal in web root
+      file:
+        src: /var/www/drupal/web
+        dest: /var/www/html
+        state: link
+        force: yes
+        
+    - name: Set up Apache VirtualHost
+      copy:
+        dest: /etc/apache2/sites-available/drupal.conf
+        content: |
+          <VirtualHost *:80>
+              ServerAdmin webmaster@{{ domain }}
+              ServerName {{ domain }}
+              ServerAlias www.{{ domain }}
+              DocumentRoot /var/www/drupal/web
+              
+              <Directory /var/www/drupal/web/>
+                  Options FollowSymLinks
+                  AllowOverride All
+                  Require all granted
+              </Directory>
+              
+              ErrorLog ${APACHE_LOG_DIR}/error.log
+              CustomLog ${APACHE_LOG_DIR}/access.log combined
+          </VirtualHost>
+      notify: Restart Apache
+        
+    - name: Enable Drupal site
+      command: a2ensite drupal
+      notify: Restart Apache
+        
+    - name: Disable default Apache site
+      command: a2dissite 000-default
+      notify: Restart Apache
+      
+    - name: Configure firewall to allow MySQL connections
+      ufw:
+        rule: allow
+        port: 3306
+        proto: tcp
+    
+    # Install Drush for command-line management
+    - name: Download Drush Launcher
+      get_url:
+        url: https://github.com/drush-ops/drush-launcher/releases/latest/download/drush.phar
+        dest: /usr/local/bin/drush
+        mode: '0755'
+  
+  handlers:
+    - name: Restart Apache
+      service:
+        name: apache2
+        state: restarted
+        
+    - name: Restart MySQL
+      service:
+        name: mysql
+        state: restarted
