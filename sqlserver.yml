@@ -3,6 +3,13 @@
   become: yes
   become_method: sudo
   become_user: root
+  
+  vars:
+    dbaas_version: "{{ morpheus['customOptions']['dbaasVersion'] }}"
+    db_root_password: "{{ morpheus['customOptions']['dbRootPassword'] }}"
+    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] }}"
+    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
+    db_name: "{{ morpheus['customOptions']['dbName'] }}"
  
   tasks:
     - name: Install required packages
@@ -35,7 +42,9 @@
  
     - name: Install SQL Server
       shell: |
-        ACCEPT_EULA=Y MSSQL_SA_PASSWORD="MyStr0ngPassw0rd!" apt-get install -y mssql-server
+        ACCEPT_EULA=Y MSSQL_SA_PASSWORD="{{ db_root_password }}" apt-get install -y mssql-server-{{ dbaas_version }}
+      register: sql_install
+      failed_when: sql_install.rc != 0 and "is already installed" not in sql_install.stderr
  
     - name: Install SQL Server tools
       apt:
@@ -62,7 +71,7 @@
       shell: |
         /opt/mssql/bin/mssql-conf setup accept-eula
       environment:
-        MSSQL_SA_PASSWORD: "MyStr0ngPassw0rd!"
+        MSSQL_SA_PASSWORD: "{{ db_root_password }}"
         MSSQL_PID: "Developer"
         ACCEPT_EULA: "Y"
  
@@ -77,29 +86,30 @@
         port: 1433
         timeout: 60
  
-    - name: Create test database
+    - name: Create database
       shell: |
-        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "MyStr0ngPassw0rd!" -Q "CREATE DATABASE TestDB"
+        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "{{ db_root_password }}" -Q "CREATE DATABASE {{ db_name }}"
       register: create_db
       failed_when: create_db.rc != 0 and "There is already an object named" not in create_db.stderr
  
-    - name: Create test user
+    - name: Create user with SA privileges
       shell: |
-        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "MyStr0ngPassw0rd!" -Q "
-        IF NOT EXISTS (SELECT name FROM sys.sql_logins WHERE name = 'testuser')
+        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "{{ db_root_password }}" -Q "
+        IF NOT EXISTS (SELECT name FROM sys.sql_logins WHERE name = '{{ dbaas_username }}')
         BEGIN
-            CREATE LOGIN testuser WITH PASSWORD = 'TestUser123!';
+            CREATE LOGIN {{ dbaas_username }} WITH PASSWORD = '{{ dbaas_password }}', CHECK_POLICY = OFF;
+            ALTER SERVER ROLE sysadmin ADD MEMBER {{ dbaas_username }};
         END;
-        USE TestDB;
-        IF NOT EXISTS (SELECT name FROM sys.database_principals WHERE name = 'testuser')
+        USE {{ db_name }};
+        IF NOT EXISTS (SELECT name FROM sys.database_principals WHERE name = '{{ dbaas_username }}')
         BEGIN
-            CREATE USER testuser FOR LOGIN testuser;
-            ALTER ROLE db_owner ADD MEMBER testuser;
+            CREATE USER {{ dbaas_username }} FOR LOGIN {{ dbaas_username }};
+            ALTER ROLE db_owner ADD MEMBER {{ dbaas_username }};
         END;"
  
     - name: Enable remote connections
       shell: |
-        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "MyStr0ngPassw0rd!" -Q "
+        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "{{ db_root_password }}" -Q "
         sp_configure 'remote access', 1;
         RECONFIGURE WITH OVERRIDE;
         GO"
@@ -115,4 +125,3 @@
       systemd:
         name: mssql-server
         state: restarted
- 
