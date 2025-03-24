@@ -28,7 +28,91 @@
  
     - name: Add Microsoft SQL Server repository
       apt_repository:
-        repo: deb [arch=amd64] https://packages.microsoft.com/ubuntu/22.04/mssql-server-{{ dbaas_version | regex_replace('^(\\d+)\\..*$', '\\1') }} jammy main
+        repo: deb [arch=amd64] https://packages.microsoft.com/ubuntu/18.04/mssql-server-{{ dbaas_version | regex_replace('^(\\d+)\\..*
+ 
+    - name: Add Microsoft repository for SQL Server tools
+      apt_repository:
+        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-archive-keyring.gpg] https://packages.microsoft.com/ubuntu/18.04/prod bionic main
+        state: present
+        filename: msprod
+        update_cache: yes
+ 
+    - name: Install SQL Server
+      shell: |
+        ACCEPT_EULA=Y MSSQL_SA_PASSWORD="{{ db_root_password }}" apt-get install -y mssql-server
+      register: sql_install
+      failed_when: sql_install.rc != 0 and "is already installed" not in sql_install.stderr
+      
+    - name: Check SQL Server version
+      shell: |
+        echo "Installing SQL Server version {{ dbaas_version }}"
+      when: dbaas_version is defined
+ 
+    - name: Install SQL Server tools
+      apt:
+        name:
+          - mssql-tools
+          - unixodbc-dev
+        state: present
+      environment:
+        ACCEPT_EULA: "Y"
+ 
+    - name: Add SQL Server tools to PATH
+      lineinfile:
+        path: /etc/profile.d/mssql-tools.sh
+        line: export PATH="$PATH:/opt/mssql-tools/bin"
+        create: yes
+        mode: '0644'
+ 
+    - name: Stop SQL Server before configuration
+      systemd:
+        name: mssql-server
+        state: stopped
+ 
+    - name: Configure SQL Server
+      shell: |
+        /opt/mssql/bin/mssql-conf setup accept-eula
+      environment:
+        MSSQL_SA_PASSWORD: "{{ db_root_password }}"
+        MSSQL_PID: Developer
+        ACCEPT_EULA: "Y"
+ 
+    - name: Start SQL Server
+      systemd:
+        name: mssql-server
+        state: started
+        enabled: yes
+ 
+    - name: Wait for SQL Server to be ready
+      wait_for:
+        port: 1433
+        timeout: 60
+ 
+    - name: Create database
+      shell: |
+        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "{{ db_root_password }}" -Q "CREATE DATABASE {{ db_name }}"
+      register: create_db
+      failed_when: create_db.rc != 0 and "There is already an object named" not in create_db.stderr
+ 
+    - name: Create user with SA privileges
+      shell: |
+        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "{{ db_root_password }}" -Q "IF NOT EXISTS (SELECT name FROM sys.sql_logins WHERE name = '{{ dbaas_username }}') BEGIN CREATE LOGIN {{ dbaas_username }} WITH PASSWORD = '{{ dbaas_password }}', CHECK_POLICY = OFF; ALTER SERVER ROLE sysadmin ADD MEMBER {{ dbaas_username }}; END; USE {{ db_name }}; IF NOT EXISTS (SELECT name FROM sys.database_principals WHERE name = '{{ dbaas_username }}') BEGIN CREATE USER {{ dbaas_username }} FOR LOGIN {{ dbaas_username }}; ALTER ROLE db_owner ADD MEMBER {{ dbaas_username }}; END;"
+ 
+    - name: Enable remote connections
+      shell: |
+        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "{{ db_root_password }}" -Q "sp_configure 'remote access', 1; RECONFIGURE WITH OVERRIDE; GO"
+ 
+    - name: Open SQL Server port
+      ufw:
+        rule: allow
+        port: 1433
+        proto: tcp
+ 
+  handlers:
+    - name: Restart SQL Server
+      systemd:
+        name: mssql-server
+        state: restarted, '\\1') }} bionic main
         state: present
         filename: mssql-server
         update_cache: yes
