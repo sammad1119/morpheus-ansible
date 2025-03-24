@@ -77,7 +77,7 @@
     
     - name: Configure SQL Server with SA password
       shell: |
-        ACCEPT_EULA=Y MSSQL_PID=Developer MSSQL_SA_PASSWORD="{{ sa_password }}" /opt/mssql/bin/mssql-conf setup -n
+        ACCEPT_EULA=Y MSSQL_PID=Developer MSSQL_SA_PASSWORD="{{ sa_password }}" /opt/mssql/bin/mssql-conf setup
     
     # Start SQL Server
     - name: Start SQL Server
