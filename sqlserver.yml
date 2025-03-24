@@ -20,6 +20,36 @@
         state: present
         update_cache: yes
     
+    # Create directory for downloaded packages
+    - name: Create temp directory for packages
+      file:
+        path: /tmp/sqlserver-deps
+        state: directory
+        mode: '0755'
+    
+    # Download libldap-2.4-2 package (needed by SQL Server 2019)
+    - name: Download libldap dependency
+      get_url:
+        url: http://archive.ubuntu.com/ubuntu/pool/main/o/openldap/libldap-2.4-2_2.4.49+dfsg-2ubuntu1.8_amd64.deb
+        dest: /tmp/sqlserver-deps/libldap-2.4-2.deb
+    
+    # Download common LDAP libraries
+    - name: Download additional LDAP dependencies
+      get_url:
+        url: "{{ item.url }}"
+        dest: "/tmp/sqlserver-deps/{{ item.name }}"
+      loop:
+        - { name: "libldap-common.deb", url: "http://archive.ubuntu.com/ubuntu/pool/main/o/openldap/libldap-common_2.4.49+dfsg-2ubuntu1.8_all.deb" }
+        - { name: "libsasl2-modules-db.deb", url: "http://archive.ubuntu.com/ubuntu/pool/main/c/cyrus-sasl2/libsasl2-modules-db_2.1.27+dfsg-2_amd64.deb" }
+        - { name: "libsasl2-2.deb", url: "http://archive.ubuntu.com/ubuntu/pool/main/c/cyrus-sasl2/libsasl2-2_2.1.27+dfsg-2_amd64.deb" }
+    
+    # Install the LDAP dependencies
+    - name: Install LDAP dependencies
+      shell: |
+        cd /tmp/sqlserver-deps
+        apt-get install -y ./libsasl2-modules-db.deb ./libsasl2-2.deb ./libldap-common.deb ./libldap-2.4-2.deb || true
+        apt-get -f install -y
+    
     # Import Microsoft's GPG key
     - name: Import Microsoft GPG key
       shell: |
@@ -29,7 +59,6 @@
         creates: /usr/share/keyrings/microsoft-prod.gpg
     
     # Add SQL Server 2019 repository for Ubuntu 22.04
-    # Note: Since 2019 doesn't have an official 22.04 repo, we use the 18.04 repo
     - name: Add SQL Server 2019 repository
       apt_repository:
         repo: deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/18.04/mssql-server-2019 bionic main
@@ -40,27 +69,22 @@
     # Add the tools repository for Ubuntu 22.04
     - name: Add Microsoft tools repository
       apt_repository:
-        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/22.04/prod jammy main
+        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/18.04/prod bionic main
         state: present
         filename: msprod
         update_cache: yes
     
-    # Install SQL Server 2019
+    # Install SQL Server 2019 with forced yes to handle interactive prompts
     - name: Install SQL Server 2019
       shell: |
-        ACCEPT_EULA=Y MSSQL_SA_PASSWORD="{{ sa_password }}" apt-get install -y --allow-downgrades mssql-server
+        DEBIAN_FRONTEND=noninteractive ACCEPT_EULA=Y MSSQL_SA_PASSWORD="{{ sa_password }}" apt-get install -y --allow-downgrades --no-install-recommends mssql-server=15.0*
       register: sql_install
       failed_when: sql_install.rc != 0 and "is already installed" not in sql_install.stderr
     
     # Install SQL Server tools
     - name: Install SQL Server command-line tools
-      apt:
-        name:
-          - mssql-tools
-          - unixodbc-dev
-        state: present
-      environment:
-        ACCEPT_EULA: "Y"
+      shell: |
+        ACCEPT_EULA=Y apt-get install -y --no-install-recommends mssql-tools unixodbc-dev
     
     # Add tools to PATH
     - name: Add SQL Server tools to PATH
@@ -75,6 +99,7 @@
       systemd:
         name: mssql-server
         state: stopped
+      ignore_errors: yes
     
     - name: Configure SQL Server with SA password
       shell: |
@@ -95,7 +120,7 @@
     - name: Wait for SQL Server to be ready
       wait_for:
         port: 1433
-        timeout: 60
+        timeout: 120
     
     # Verify installation
     - name: Verify SQL Server version
