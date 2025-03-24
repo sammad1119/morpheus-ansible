@@ -5,85 +5,73 @@
   become_user: root
   
   vars:
-    dbaas_version: "{{ morpheus['customOptions']['dbaasVersion'] }}"
-    db_root_password: "{{ morpheus['customOptions']['dbRootPassword'] }}"
-    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] }}"
-    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
-    db_name: "{{ morpheus['customOptions']['dbName'] }}"
+    # Use the version variable from Morpheus
+    sql_version: "{{ morpheus['customOptions']['dbaasVersion'] }}"
+    # Use the root password for SA
+    sa_password: "{{ morpheus['customOptions']['dbRootPassword'] }}"
  
   tasks:
-    - name: Install required packages
+    - name: Install prerequisites
       apt:
         name:
-          - sudo
           - curl
           - gnupg2
           - apt-transport-https
         state: present
         update_cache: yes
- 
+    
     - name: Create keyrings directory
       file:
         path: /etc/apt/keyrings
         state: directory
         mode: '0755'
- 
+    
     - name: Download Microsoft GPG key
       get_url:
         url: https://packages.microsoft.com/keys/microsoft.asc
         dest: /tmp/microsoft.asc
         mode: '0644'
- 
+    
     - name: Import Microsoft GPG key
       shell: |
         cat /tmp/microsoft.asc | gpg --dearmor > /etc/apt/keyrings/microsoft.gpg
         chmod 644 /etc/apt/keyrings/microsoft.gpg
       args:
         creates: /etc/apt/keyrings/microsoft.gpg
- 
+    
+    # Determine the correct repository based on SQL Server version
+    - name: Set repo facts based on SQL version
+      set_fact:
+        repo_url: "{{ 
+          'https://packages.microsoft.com/ubuntu/18.04/mssql-server-2017 bionic' 
+            if sql_version.startswith('14') else
+          'https://packages.microsoft.com/ubuntu/18.04/mssql-server-2019 bionic'
+            if sql_version.startswith('15') else
+          'https://packages.microsoft.com/ubuntu/22.04/mssql-server-2022 jammy' 
+        }}"
+    
     - name: Add SQL Server repository
-      block:
-        - name: Add SQL Server 2017 repository (for version 14.x)
-          apt_repository:
-            repo: deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/ubuntu/18.04/mssql-server-2017 bionic main
-            state: present
-            filename: mssql-server
-          when: dbaas_version is version('15.0', '<')
-        
-        - name: Add SQL Server 2019 repository (for version 15.x)
-          apt_repository:
-            repo: deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/ubuntu/18.04/mssql-server-2019 bionic main
-            state: present
-            filename: mssql-server
-          when: dbaas_version is version('15.0', '>=') and dbaas_version is version('16.0', '<')
-        
-        - name: Add SQL Server 2022 repository (for version 16.x)
-          apt_repository:
-            repo: deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/ubuntu/22.04/mssql-server-2022 jammy main
-            state: present
-            filename: mssql-server
-          when: dbaas_version is version('16.0', '>=')
- 
-    - name: Add Microsoft repository for SQL Server tools
+      apt_repository:
+        repo: deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] {{ repo_url }} main
+        state: present
+        filename: mssql-server
+    
+    - name: Add Microsoft tools repository
       apt_repository:
         repo: deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/ubuntu/18.04/prod bionic main
         state: present
         filename: msprod
- 
-    - name: Update apt cache
-      apt:
         update_cache: yes
- 
+    
     - name: Install SQL Server
       apt:
         name: mssql-server
         state: present
       environment:
         ACCEPT_EULA: "Y"
-        MSSQL_SA_PASSWORD: "{{ db_root_password }}"
-      register: sql_install
- 
-    - name: Install SQL Server tools
+        MSSQL_SA_PASSWORD: "{{ sa_password }}"
+    
+    - name: Install SQL Server command-line tools
       apt:
         name:
           - mssql-tools
@@ -91,60 +79,36 @@
         state: present
       environment:
         ACCEPT_EULA: "Y"
- 
-    - name: Add SQL Server tools to PATH
-      lineinfile:
-        path: /etc/profile.d/mssql-tools.sh
-        line: export PATH="$PATH:/opt/mssql-tools/bin"
-        create: yes
-        mode: '0644'
- 
+    
     - name: Stop SQL Server before configuration
       systemd:
         name: mssql-server
         state: stopped
- 
-    - name: Configure SQL Server
+    
+    - name: Configure SQL Server with new SA password
       shell: |
-        /opt/mssql/bin/mssql-conf setup accept-eula
+        /opt/mssql/bin/mssql-conf set-sa-password
       environment:
-        MSSQL_SA_PASSWORD: "{{ db_root_password }}"
-        MSSQL_PID: Developer
+        MSSQL_SA_PASSWORD: "{{ sa_password }}"
         ACCEPT_EULA: "Y"
- 
+    
     - name: Start SQL Server
       systemd:
         name: mssql-server
         state: started
         enabled: yes
- 
+    
     - name: Wait for SQL Server to be ready
       wait_for:
         port: 1433
         timeout: 60
- 
-    - name: Create database
+    
+    - name: Verify SQL Server version
       shell: |
-        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "{{ db_root_password }}" -Q "CREATE DATABASE {{ db_name }}"
-      register: create_db
-      failed_when: create_db.rc != 0 and "There is already an object named" not in create_db.stderr
- 
-    - name: Create user with SA privileges
-      shell: |
-        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "{{ db_root_password }}" -Q "IF NOT EXISTS (SELECT name FROM sys.sql_logins WHERE name = '{{ dbaas_username }}') BEGIN CREATE LOGIN {{ dbaas_username }} WITH PASSWORD = '{{ dbaas_password }}', CHECK_POLICY = OFF; ALTER SERVER ROLE sysadmin ADD MEMBER {{ dbaas_username }}; END; USE {{ db_name }}; IF NOT EXISTS (SELECT name FROM sys.database_principals WHERE name = '{{ dbaas_username }}') BEGIN CREATE USER {{ dbaas_username }} FOR LOGIN {{ dbaas_username }}; ALTER ROLE db_owner ADD MEMBER {{ dbaas_username }}; END;"
- 
-    - name: Enable remote connections
-      shell: |
-        /opt/mssql-tools/bin/sqlcmd -S localhost -U SA -P "{{ db_root_password }}" -Q "sp_configure 'remote access', 1; RECONFIGURE WITH OVERRIDE; GO"
- 
-    - name: Open SQL Server port
-      ufw:
-        rule: allow
-        port: 1433
-        proto: tcp
- 
-  handlers:
-    - name: Restart SQL Server
-      systemd:
-        name: mssql-server
-        state: restarted
+        export PATH=$PATH:/opt/mssql-tools/bin
+        sqlcmd -S localhost -U SA -P "{{ sa_password }}" -Q "SELECT @@VERSION"
+      register: sql_version_output
+    
+    - name: Display SQL Server version
+      debug:
+        var: sql_version_output.stdout_lines
