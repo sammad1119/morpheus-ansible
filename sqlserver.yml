@@ -17,60 +17,104 @@
           - curl
           - gnupg2
           - apt-transport-https
+          - wget
+          - software-properties-common
         state: present
         update_cache: yes
     
+    # Create directory for downloaded packages
+    - name: Create temp directory for packages
+      file:
+        path: /tmp/sqlserver-deps
+        state: directory
+        mode: '0755'
+    
+    # If installing SQL Server 14 on Ubuntu 22.04, download dependencies
+    - name: Download dependencies for SQL Server 14
+      get_url:
+        url: "{{ item.url }}"
+        dest: "/tmp/sqlserver-deps/{{ item.name }}"
+      loop:
+        - { name: "libssl1.0.0.deb", url: "http://security.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.0.0_1.0.2g-1ubuntu4.20_amd64.deb" }
+        - { name: "libjemalloc1.deb", url: "http://archive.ubuntu.com/ubuntu/pool/universe/j/jemalloc/libjemalloc1_3.6.0-11_amd64.deb" }
+      when: sql_version.startswith('14')
+    
+    - name: Install dependencies for SQL Server 14
+      shell: |
+        dpkg -i --force-all /tmp/sqlserver-deps/libssl1.0.0.deb /tmp/sqlserver-deps/libjemalloc1.deb || true
+        apt-get -f install -y
+      when: sql_version.startswith('14')
+    
+    # Install Python 2.7 for SQL Server 14
+    - name: Install Python 2.7
+      apt:
+        name: python2
+        state: present
+      when: sql_version.startswith('14')
+    
+    - name: Create python symlink
+      file:
+        src: /usr/bin/python2
+        dest: /usr/bin/python
+        state: link
+        force: yes
+      when: sql_version.startswith('14')
+    
+    # Import Microsoft's GPG key
     - name: Create keyrings directory
       file:
-        path: /etc/apt/keyrings
+        path: /usr/share/keyrings
         state: directory
         mode: '0755'
     
     - name: Download Microsoft GPG key
-      get_url:
-        url: https://packages.microsoft.com/keys/microsoft.asc
-        dest: /tmp/microsoft.asc
-        mode: '0644'
-    
-    - name: Import Microsoft GPG key
       shell: |
-        cat /tmp/microsoft.asc | gpg --dearmor > /etc/apt/keyrings/microsoft.gpg
-        chmod 644 /etc/apt/keyrings/microsoft.gpg
+        wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /usr/share/keyrings/microsoft-archive-keyring.gpg
       args:
-        creates: /etc/apt/keyrings/microsoft.gpg
+        creates: /usr/share/keyrings/microsoft-archive-keyring.gpg
     
-    # Determine the correct repository based on SQL Server version
-    - name: Set repo facts based on SQL version
-      set_fact:
-        repo_url: "{{ 
-          'https://packages.microsoft.com/ubuntu/18.04/mssql-server-2017 bionic' 
-            if sql_version.startswith('14') else
-          'https://packages.microsoft.com/ubuntu/18.04/mssql-server-2019 bionic'
-            if sql_version.startswith('15') else
-          'https://packages.microsoft.com/ubuntu/22.04/mssql-server-2022 jammy' 
-        }}"
-    
-    - name: Add SQL Server repository
+    # Choose the right SQL Server repository based on version
+    - name: Add SQL Server repository for version 14
       apt_repository:
-        repo: deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] {{ repo_url }} main
+        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-archive-keyring.gpg] https://packages.microsoft.com/ubuntu/18.04/mssql-server-2017 bionic main
         state: present
         filename: mssql-server
+      when: sql_version.startswith('14')
     
+    - name: Add SQL Server repository for version 15
+      apt_repository:
+        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-archive-keyring.gpg] https://packages.microsoft.com/ubuntu/18.04/mssql-server-2019 bionic main
+        state: present
+        filename: mssql-server
+      when: sql_version.startswith('15')
+    
+    - name: Add SQL Server repository for version 16
+      apt_repository:
+        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-archive-keyring.gpg] https://packages.microsoft.com/ubuntu/22.04/mssql-server-2022 jammy main
+        state: present
+        filename: mssql-server
+      when: sql_version.startswith('16')
+    
+    # Add the tools repository for Ubuntu 22.04 (Jammy)
     - name: Add Microsoft tools repository
       apt_repository:
-        repo: deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/ubuntu/18.04/prod bionic main
+        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-archive-keyring.gpg] https://packages.microsoft.com/ubuntu/22.04/prod jammy main
         state: present
         filename: msprod
+    
+    # Update apt cache after adding repositories
+    - name: Update apt cache
+      apt:
         update_cache: yes
     
+    # Install SQL Server with version specific flags
     - name: Install SQL Server
-      apt:
-        name: mssql-server
-        state: present
-      environment:
-        ACCEPT_EULA: "Y"
-        MSSQL_SA_PASSWORD: "{{ sa_password }}"
+      shell: |
+        ACCEPT_EULA=Y MSSQL_SA_PASSWORD="{{ sa_password }}" apt-get install -y --allow-downgrades mssql-server
+      register: sql_install
+      failed_when: sql_install.rc != 0 and "is already installed" not in sql_install.stderr
     
+    # Install SQL Server tools
     - name: Install SQL Server command-line tools
       apt:
         name:
@@ -80,29 +124,41 @@
       environment:
         ACCEPT_EULA: "Y"
     
+    # Add tools to PATH
+    - name: Add SQL Server tools to PATH
+      lineinfile:
+        path: /etc/profile.d/mssql-tools.sh
+        line: export PATH="$PATH:/opt/mssql-tools/bin"
+        create: yes
+        mode: '0644'
+    
+    # Configure with the specified SA password
     - name: Stop SQL Server before configuration
       systemd:
         name: mssql-server
         state: stopped
     
-    - name: Configure SQL Server with new SA password
+    - name: Configure SQL Server with SA password
       shell: |
         /opt/mssql/bin/mssql-conf set-sa-password
       environment:
         MSSQL_SA_PASSWORD: "{{ sa_password }}"
         ACCEPT_EULA: "Y"
     
+    # Start SQL Server
     - name: Start SQL Server
       systemd:
         name: mssql-server
         state: started
         enabled: yes
     
+    # Wait for server to be ready
     - name: Wait for SQL Server to be ready
       wait_for:
         port: 1433
         timeout: 60
     
+    # Verify installation
     - name: Verify SQL Server version
       shell: |
         export PATH=$PATH:/opt/mssql-tools/bin
