@@ -1,0 +1,92 @@
+---
+- hosts: all
+  become: yes
+  become_method: sudo
+  become_user: root
+
+  vars:
+    dbaas_version: "{{ morpheus['customOptions']['dbaasVersion'] }}"
+    dbaas_username: "{{ morpheus['customOptions']['dbaasUsername'] }}"
+    dbaas_password: "{{ morpheus['customOptions']['dbaasPassword'] }}"
+    db_name: "{{ morpheus['customOptions']['dbName'] }}"
+    custom_mysql_port: 4406
+
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - sudo
+          - acl
+          - python3-pip
+          - python3-mysqldb
+          - ufw
+        state: present
+        update_cache: yes
+
+    - name: Install MySQL Server and Client
+      apt:
+        pkg:
+          - mysql-server
+          - mysql-client
+        state: present
+        update_cache: yes
+
+    - name: Ensure MySQL is running
+      systemd:
+        name: mysql
+        state: started
+        enabled: yes
+
+    - name: Allow custom MySQL port in UFW
+      ufw:
+        rule: allow
+        port: "{{ custom_mysql_port }}"
+        proto: tcp
+
+    - name: Create application database
+      mysql_db:
+        name: "{{ db_name }}"
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Create database user
+      mysql_user:
+        name: "{{ dbaas_username }}"
+        password: "{{ dbaas_password }}"
+        priv: '*.*:ALL,GRANT'
+        host: '%'
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Allow remote connections - bind address
+      replace:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^bind-address\s*=\s*127\.0\.0\.1'
+        replace: 'bind-address = 0.0.0.0'
+      notify: Restart MySQL
+
+    - name: Set custom MySQL port
+      lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^port\s*='
+        line: "port = {{ custom_mysql_port }}"
+        insertafter: '[mysqld]'
+      notify: Restart MySQL
+
+    - name: Update MySQL configuration for remote access
+      blockinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        block: |
+          skip-external-locking
+          skip-name-resolve
+        insertafter: '[mysqld]'
+      notify: Restart MySQL
+
+    - name: Flush MySQL privileges
+      command: mysql -e "FLUSH PRIVILEGES;"
+
+  handlers:
+    - name: Restart MySQL
+      systemd:
+        name: mysql
+        state: restarted
